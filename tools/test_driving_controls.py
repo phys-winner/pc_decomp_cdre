@@ -341,7 +341,11 @@ public class DrivingControlsProbe {
   dimensionActivity.prefs.edit().putBoolean("legacyLayout",true).apply();c=create(dimensionActivity,2000,1000);
   check(Math.abs(c.leftArrow.cx-420*2000f/2424)<.01f,"both preset drafts save independently");
   c.beginEdit();c.switchStyle();c.endEdit(false);check(c.isLegacyLayout(),"cancel restores chosen preset");
-  System.out.println("PASS production controls: 45 layouts, arrow transfer/outside/owners, utility positions, safe area, gas/fire, cancel, editor and localization");
+  c=create(new GameActivity(),2424,1080);c.setHardwareInput(true);
+  GameActivity.buttons=0x1000;GameActivity.rt=.75f;c.sendState();c.setWeaponsEnabled(0);c.release();
+  check(GameActivity.buttons==0x1000&&GameActivity.rt==.75f&&c.isEnabled(),"visible touch controls preserve active physical input");
+  c.setHardwareInput(false);check(GameActivity.buttons==0&&GameActivity.rt==0&&c.isEnabled(),"touch takes ownership without changing visibility preference");
+  System.out.println("PASS production controls: 45 layouts, arrow transfer/outside/owners, utility positions, safe area, gas/fire, cancel, editor, localization and physical input ownership");
  }
 }
 '''

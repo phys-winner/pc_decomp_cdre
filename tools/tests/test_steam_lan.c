@@ -18,6 +18,7 @@ int main(int argc, char **argv)
         int persisted = 0; uint32_t id = lan_persistent_identity(argv[1], &persisted);
         assert(persisted && id > 1); printf("%08X\n", id); return 0;
     }
+    strcpy(host.name,"Host Driver");strcpy(client.name,"\xD0\x93\xD0\xBE\xD0\xBD\xD1\x89\xD0\xB8\xD0\xBA");
     assert(lan_init(&host,htonl(0x7f000002u),123));assert(lan_init(&client,htonl(0x7f000003u),456));
     assert(host.id!=client.id);assert(lan_create(&host,2,8));uint64_t lobby=host.joined;
     /* The original browser rejects generic chat IDs without the lobby flag. */
@@ -30,6 +31,8 @@ int main(int argc, char **argv)
     assert(!strcmp(lan_key(l->data,LAN_KEYS,"name",0)->value,"LAN transport fixture"));
     client.search_until=0;lan_pump(&client);assert(client.search_count==1 && client.search_ids[0]==lobby);
     assert(lan_join(&client,lobby));wait_pair(250);assert(client.join_call==0 && h->count==2 && l->count==2);
+    assert(!strcmp(h->members[0].name,host.name) && !strcmp(l->members[0].name,host.name));
+    assert(!strcmp(h->members[1].name,client.name) && !strcmp(l->members[1].name,client.name));
     for(int i=0;i<100;++i) {unsigned char p[1996];memset(p,i,sizeof p);lan_put32(p,i);assert(lan_send_packet(&host,client.id,p,sizeof p,2,3));}
     assert(lan_send_packet(&client,host.id,"reply",6,0,1));wait_pair(500);
     int count=0;for(lan_packet *p=client.packets;p;p=p->next){assert(p->sender==host.id && p->channel==3 && p->size==1996 && lan_get32(p->data)==(uint32_t)count++);}

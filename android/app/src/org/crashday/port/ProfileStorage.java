@@ -22,6 +22,45 @@ final class ProfileStorage {
         return new File(ROOT, profileName(context));
     }
 
+    static String validPlayerName(String text) {
+        for (int i = 0; i < text.length();) {
+            int point = text.codePointAt(i);
+            if (Character.isISOControl(point) || Character.getType(point) == Character.FORMAT ||
+                Character.getType(point) == Character.LINE_SEPARATOR || Character.getType(point) == Character.PARAGRAPH_SEPARATOR ||
+                point >= 0xD800 && point <= 0xDFFF) return null;
+            i += Character.charCount(point);
+        }
+        String value = text.trim();
+        if (value.isEmpty() || value.codePointCount(0, value.length()) > 32 ||
+            value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 63) return null;
+        return value;
+    }
+
+    static String playerName(Context context) throws IOException {
+        File file = new File(profile(context), "player-name");
+        if (!file.exists()) return "";
+        if (file.length() > 63) throw new IOException("Invalid player name size");
+        String value = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+            .decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file.toPath()))).toString();
+        if (validPlayerName(value) == null) throw new IOException("Invalid player name");
+        return value;
+    }
+
+    static void savePlayerName(Context context, String value) throws IOException {
+        value = validPlayerName(value);
+        if (value == null) throw new IOException("Invalid player name");
+        File directory = profile(context);
+        File temporary = File.createTempFile("player-name-", ".tmp", directory);
+        try {
+            try (FileOutputStream stream = new FileOutputStream(temporary)) {
+                stream.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                stream.getFD().sync();
+            }
+            Files.move(temporary.toPath(), new File(directory, "player-name").toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally { temporary.delete(); }
+    }
+
     static int migrate(Context context) throws IOException {
         String name = profileName(context);
         File destination = profile(context);

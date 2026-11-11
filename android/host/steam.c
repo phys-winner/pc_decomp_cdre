@@ -494,9 +494,28 @@ static uint32_t friends_empty_text(void)
     if (!text) text = void_gstrdup("");
     return text;
 }
+const char *void_steam_player_name(void)
+{
+    static char fallback[64];
+    if (*steam_lan.name) return steam_lan.name;
+    snprintf(fallback, sizeof fallback, "LAN %04X", (unsigned)steam_identity() & 65535);
+    return fallback;
+}
+
+void void_steam_player_name_set(const char *name)
+{
+    snprintf(steam_lan.name, sizeof steam_lan.name, "%s", name);
+    if (steam_lan.started == 1) {
+        unsigned char changed[12] = {0};
+        lan_put64(changed, steam_lan.id);
+        lan_put32(changed + 8, 1); /* k_EPersonaChangeName: original UTF-8 conversion and length limit. */
+        lan_event_add(&steam_lan, 304, 0, changed, sizeof changed);
+    }
+}
+
 COM_METHOD(friends, GetPersonaName, 0)
 {
-    char name[64];snprintf(name,sizeof name,"LAN %04X",(unsigned)steam_identity()&65535);return steam_result_text(name);
+    return steam_result_text(void_steam_player_name());
 }
 static uint32_t friends_id_result(uint32_t result)
 {
@@ -514,7 +533,9 @@ FR0(GetFriendRelationship, 2)
 FR0(GetFriendPersonaState, 2)
 COM_METHOD(friends, GetFriendPersonaName, 2)
 {
-    uint64_t id=steam_arg64(0);lan_member *m=lan_member_find(lan_lobby_find(&steam_lan,steam_lan.joined),id);
+    uint64_t id=steam_arg64(0);
+    if (id == steam_identity()) return steam_result_text(void_steam_player_name());
+    lan_member *m=lan_member_find(lan_lobby_find(&steam_lan,steam_lan.joined),id);
     char name[64];snprintf(name,sizeof name,"LAN %04X",(unsigned)id&65535);return steam_result_text(m?m->name:name);
 }
 FR0(GetFriendGamePlayed, 3)

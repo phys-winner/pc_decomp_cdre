@@ -5,7 +5,7 @@ static recompilation of the original 32-bit Windows program and its runtime
 dependencies. The translated code runs natively on ARM64; the port supplies the
 Windows interfaces, Direct3D 9 renderer, audio, storage and Android integration.
 
-**Port version: `0.1-dev` · Android package: `org.crashday.port` · version code: `1`.**
+**Port version: `0.1.1-dev` · Android package: `org.crashday.port` · version code: `4`.**
 
 Project: [phys-winner/pc_decomp_cdre](https://github.com/phys-winner/pc_decomp_cdre).
 APK releases belong on the project's
@@ -45,10 +45,9 @@ not needed on the phone.
 - Space for the APK, approximately 531 MiB of original game files, saves and
   additional texture-conversion output. Conversion needs temporary free space.
 
-1. Install the APK. This build uses version code `1`. Android blocks a normal
-   update over earlier local development APKs with higher codes (`2` or `3`).
-   Back up player files and app preferences before removing an older APK.
-   Future updates must retain the signing certificate to install over this one.
+1. Install the APK. This build uses version code `4` and can update the first
+   public build (code `1`) and earlier local builds (codes `2` or `3`).
+   Updates must retain the signing certificate to preserve the installed app's data.
 2. Open Crashday. If game files are missing, press **Import from a ZIP…** on the
    main game card, select the archive, review the destination and free space,
    then press **Unpack**. The ZIP may contain `data/` and `user/` directly or

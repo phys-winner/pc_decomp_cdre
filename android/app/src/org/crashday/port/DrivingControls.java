@@ -231,8 +231,17 @@ final class DrivingControls extends View implements SensorEventListener {
             "Сенсорное управление гонкой. Удерживайте педаль для газа или торможения; управляйте выбранным способом. Переместите палец с газа на оружие или нитро, чтобы продолжать разгон."));
     }
 
+    private boolean hardwareInput;
+
+    void setHardwareInput(boolean value) {
+        if (hardwareInput == value) return;
+        hardwareInput = value;
+        release();
+        updateSensor();
+    }
+
     private void updateSensor() {
-        boolean wanted = enabled && controlsVisible && getVisibility() == VISIBLE && !editing &&
+        boolean wanted = !hardwareInput && enabled && controlsVisible && getVisibility() == VISIBLE && !editing &&
             steeringMode == STEERING_TILT && currentLayout() == DRIVING && gravity != null;
         if (wanted == listening) return;
         if (wanted) sensors.registerListener(this, gravity, SensorManager.SENSOR_DELAY_GAME);
@@ -246,6 +255,7 @@ final class DrivingControls extends View implements SensorEventListener {
     }
 
     @Override public void onSensorChanged(SensorEvent event) {
+        if (hardwareInput) return;
         float gx = event.values[0], gy = event.values[1];
         if (accelerometer) {
             filtered[0] += (gx - filtered[0]) * .2f;
@@ -288,8 +298,10 @@ final class DrivingControls extends View implements SensorEventListener {
         lastButtons = 0;
         lastLeftX = lastLeftY = lastRightX = lastRightY = lastLeftTrigger = lastRightTrigger = 0;
         sent = true;
-        GameActivity.nativeDriving(false); // Clear pending button edges on cancel/lifecycle reset.
-        GameActivity.nativeController(0, 0, 0, 0, 0, 0, 0);
+        if (!hardwareInput) {
+            GameActivity.nativeDriving(false); // Clear pending button edges on cancel/lifecycle reset.
+            GameActivity.nativeController(0, 0, 0, 0, 0, 0, 0);
+        }
         GameActivity.nativeHorizon(0);
         invalidate();
     }
@@ -306,7 +318,7 @@ final class DrivingControls extends View implements SensorEventListener {
     }
 
     private void sendState() {
-        if (editing) return;
+        if (editing || hardwareInput) return;
         if ((!enabled && !inGame) || !controlsVisible || getVisibility() != VISIBLE) {
             if (sent && (lastButtons != 0 || lastLeftX != 0 || lastLeftY != 0 || lastRightX != 0 ||
                 lastRightY != 0 || lastLeftTrigger != 0 || lastRightTrigger != 0)) release();

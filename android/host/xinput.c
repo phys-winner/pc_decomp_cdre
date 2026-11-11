@@ -42,7 +42,9 @@ static uint32_t xinput_capabilities(uint32_t index, uint32_t flags, uint32_t out
     memset(GPTR(out), 0, 20);
     MEM8(out) = 1;
     MEM8(out + 1) = 1;
-    memcpy(GPTR(out + 4), state + 4, 12);
+    MEM16(out + 4) = 0xF3FFu;
+    MEM8(out + 6) = MEM8(out + 7) = 255;
+    for (uint32_t axis = 8; axis < 16; axis += 2) MEM16(out + axis) = 32767;
     void_set_last_error(0);
     return 0;
 }

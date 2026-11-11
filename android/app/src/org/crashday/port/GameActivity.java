@@ -38,6 +38,10 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     static native void nativeDelete();
     static native void nativeButton(boolean down);
     static native void nativeRightButton(boolean down);
+    static native void nativeMouseButton(int button, boolean down);
+    static native boolean nativeProfileHit(float x, float y);
+    static native void nativePlayerName(byte[] utf8);
+    static native byte[] nativePlayerNameGet();
     static native void nativeWheel(int delta);
     static native boolean nativeMenuScroll(int steps);
     static native void nativeUiScale(int percent);
@@ -88,7 +92,19 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private android.net.wifi.WifiManager.MulticastLock lanLock;
     private android.net.wifi.WifiManager.WifiLock lanWifiLock;
     private boolean surfaceReady, started, launcherVisible, gameReady, activityResumed;
-    private int mousePointer = -1;
+    private int mouseButtons;
+    private int settingsDirections;
+    private boolean hardwareInput, profileClick;
+    private android.app.AlertDialog nameDialog;
+    private android.app.AlertDialog inputDialog;
+    private boolean inputPrompted, externalInputAttached;
+    private final GamepadInput gamepad = new GamepadInput();
+    private final android.hardware.input.InputManager.InputDeviceListener deviceListener =
+        new android.hardware.input.InputManager.InputDeviceListener() {
+            @Override public void onInputDeviceAdded(int id) { inputDevicesChanged(); }
+            @Override public void onInputDeviceChanged(int id) { gamepad.removed(id); inputDevicesChanged(); }
+            @Override public void onInputDeviceRemoved(int id) { cancelInput(); inputDevicesChanged(); }
+        };
     int steeringMode, controlLayout, steeringSensitivity, uiScale = 100, renderScale = 100;
     private int runningRenderScale;
     private String language, runningLanguage;
@@ -125,6 +141,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                 status.setVisibility(View.GONE);
                 syncMenu();
                 launch.firstFrame(root);
+                offerTouchVisibility();
             } else if (result != Integer.MIN_VALUE) {
                 if (result == 0) {
                     launch.exited(0);
@@ -160,8 +177,10 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         if (touchMenu != null) touchMenu.cancelGesture();
         if (sceneControls != null) sceneControls.cancelGesture();
         if (portSettings != null) portSettings.cancelGesture();
-        if (mousePointer >= 0) nativeButton(false);
-        mousePointer = -1;
+        mouseButtons = 0;
+        settingsDirections = 0;
+        profileClick = false;
+        gamepad.release();
         nativeCancelInput();
     }
 
@@ -423,6 +442,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             }
         });
         setContentView(root);
+        ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE))
+            .registerInputDeviceListener(deviceListener, handler);
         refreshFpsRates();
         applyFps();
         nativeTouchMode(false);
@@ -472,6 +493,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
 
     void openPortSettings() {
+        cancelInput();
         settingsRenderScale = renderScale;
         settingsLanguage = language;
         touchMenu.onPortSettings();
@@ -479,6 +501,94 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         driveButton.setVisibility(View.GONE);
         portSettings.open();
         nativeMenuOverlay(true);
+    }
+
+    void editPlayerName() {
+        if (nameDialog != null || inputDialog != null || nativeUiScene() != 0) return;
+        cancelInput();
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setSingleLine(true);
+        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE |
+            android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN |
+            android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+        field.setText(new String(nativePlayerNameGet(), java.nio.charset.StandardCharsets.UTF_8));
+        field.selectAll();
+        int padding = Math.round(24 * getResources().getDisplayMetrics().density);
+        FrameLayout container = new FrameLayout(this);
+        container.setPadding(padding, 0, padding, 0);
+        container.addView(field);
+        nameDialog = new android.app.AlertDialog.Builder(this)
+            .setTitle(tr("Player name", "Имя игрока"))
+            .setView(container)
+            .setNegativeButton(tr("Cancel", "Отмена"), null)
+            .setPositiveButton(tr("Save", "Сохранить"), null).create();
+        nameDialog.setOnDismissListener(dialog -> { nameDialog = null; immersive(); });
+        nameDialog.setOnShowListener(dialog -> nameDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String value = ProfileStorage.validPlayerName(field.getText().toString());
+            if (value == null) {
+                field.setError(tr("Enter a shorter name without line breaks or control characters", "Введите непустое короткое имя без переносов строк и управляющих символов"));
+                return;
+            }
+            try {
+                ProfileStorage.savePlayerName(this, value);
+                nativePlayerName(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                nameDialog.dismiss();
+            } catch (java.io.IOException error) {
+                field.setError(tr("Could not save the name", "Не удалось сохранить имя"));
+            }
+        }));
+        field.setOnEditorActionListener((view, action, event) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_DONE) return false;
+            nameDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();
+            return true;
+        });
+        nameDialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE |
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        nameDialog.show();
+        field.requestFocus();
+    }
+
+    private void inputDevicesChanged() {
+        boolean external = GamepadInput.externalInputAttached();
+        if (external != externalInputAttached) {
+            externalInputAttached = external;
+            inputPrompted = false;
+            if (inputDialog != null) inputDialog.dismiss();
+        }
+        offerTouchVisibility();
+    }
+
+    private void offerTouchVisibility() {
+        if (inputPrompted || !gameReady || !activityResumed || touchEditor || textEditorActive ||
+            nameDialog != null || inputDialog != null || portSettings.isFull()) return;
+        inputPrompted = true;
+        if (preferences.getBoolean("touchInputPromptDisabled", false)) return;
+        boolean external = GamepadInput.externalInputAttached();
+        externalInputAttached = external;
+        if (external != drivingControls.isEnabled()) return;
+        cancelInput();
+        nativePause(true);
+        android.widget.CheckBox remember = new android.widget.CheckBox(this);
+        remember.setText(tr("Don't ask again", "Больше не предлагать"));
+        inputDialog = new android.app.AlertDialog.Builder(this)
+            .setTitle(tr("On-screen controls", "Наэкранное управление"))
+            .setMessage(external ? tr("A controller or keyboard is connected. Hide the on-screen controls?",
+                "Подключён геймпад или клавиатура. Скрыть наэкранное управление?") :
+                tr("No controller or keyboard detected. Show the on-screen controls?",
+                "Геймпад или клавиатура не обнаружены. Показать наэкранное управление?"))
+            .setView(remember)
+            .setNegativeButton(tr("Keep current settings", "Оставить как есть"), null)
+            .setPositiveButton(external ? tr("Hide", "Скрыть") : tr("Show", "Показать"), (dialog, which) -> {
+                if (drivingControls.isEnabled() == external) toggleDriving();
+            }).create();
+        inputDialog.setOnDismissListener(dialog -> {
+            preferences.edit().putBoolean("touchInputPromptDisabled", remember.isChecked()).apply();
+            inputDialog = null;
+            if (started && activityResumed && surfaceReady && !touchEditor) nativePause(false);
+            immersive();
+        });
+        inputDialog.show();
     }
 
     void openTextEditor() {
@@ -612,8 +722,6 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         if (portSettings.isFull()) drivingControls.setVisibility(View.GONE);
         driveButton.setText(drivingControls.isEnabled() ? tr("Touch", "Сенсор") : tr("Drive", "Руль"));
         if (drivingControls.isEnabled() && touchMenu.inGame()) touchMenu.onDrivingEnabled();
-        if (mousePointer >= 0) nativeButton(false);
-        mousePointer = -1;
         portSettings.invalidate();
         syncMenu();
     }
@@ -652,6 +760,12 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             return;
         }
         launch.starting();
+        try {
+            nativePlayerName(ProfileStorage.playerName(this).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException error) {
+            android.util.Log.w("Crashday", "Could not read the player name; using the default", error);
+            nativePlayerName(new byte[0]);
+        }
         boolean crashTest = getIntent().getBooleanExtra("crashTest", false) && ProfileStorage.profileName(this).startsWith("userdata-");
         int error = nativeStart(game.getAbsolutePath(), images.getAbsolutePath(), userdata.getAbsolutePath(), getAssets(), crashTest, renderScale);
         if (error != 0) { refuse("Ошибка запуска: " + error); return; }
@@ -732,8 +846,9 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         drivingControls.setSensitivity(steeringSensitivity);
         drivingControls.setEnabled(drivingControls.isEnabled());
         nativeDriving(touchMenu.inGame());
-        nativePause(touchEditor);
+        nativePause(touchEditor || inputDialog != null);
         syncMenu();
+        inputDevicesChanged();
     }
     @Override public void onPause() {
         activityResumed = false;
@@ -748,6 +863,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
     @Override protected void onDestroy() {
         cancelInput();
+        ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE)).unregisterInputDeviceListener(deviceListener);
         drivingControls.setEnabled(false);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null)
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback((android.window.OnBackInvokedCallback) backCallback);
@@ -760,33 +876,65 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             cancelInput();
             return true;
         }
-        int index = event.getActionIndex(), id = event.getPointerId(index);
-        if ((action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) && mousePointer < 0) {
-            mousePointer = id;
-            nativePointer(pointerX(event.getRawX(index)), pointerY(event.getRawY(index)), false);
-            nativeButton(true);
-        } else if (action == MotionEvent.ACTION_MOVE && mousePointer >= 0) {
-            index = event.findPointerIndex(mousePointer);
-            if (index >= 0) nativePointer(pointerX(event.getRawX(index)), pointerY(event.getRawY(index)), false);
-        } else if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) && id == mousePointer) {
-            nativePointer(pointerX(event.getRawX(index)), pointerY(event.getRawY(index)), false);
-            nativeButton(false);
-            mousePointer = -1;
+        if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_MOVE &&
+            action != MotionEvent.ACTION_HOVER_MOVE && action != MotionEvent.ACTION_BUTTON_PRESS &&
+            action != MotionEvent.ACTION_BUTTON_RELEASE && action != MotionEvent.ACTION_SCROLL) return false;
+        float x = pointerX(event.getRawX()), y = pointerY(event.getRawY());
+        int next = event.getButtonState();
+        if (action == MotionEvent.ACTION_DOWN && next == 0) next = MotionEvent.BUTTON_PRIMARY;
+        if (action == MotionEvent.ACTION_DOWN && next == MotionEvent.BUTTON_PRIMARY && nativeProfileHit(x, y))
+            profileClick = true;
+        if (profileClick) {
+            if (action == MotionEvent.ACTION_UP) {
+                profileClick = false;
+                if (nativeProfileHit(x, y)) editPlayerName();
+            }
+            return true;
         }
+        boolean paused = touchMenu.isPaused();
+        if (!paused) nativePointer(x, y, false);
+        boolean pauseClick = paused && (mouseButtons & MotionEvent.BUTTON_PRIMARY) != 0 &&
+            (next & MotionEvent.BUTTON_PRIMARY) == 0;
+        for (int i = 0; i < 5; ++i) {
+            if (paused && i == 0) continue; // The race HUD uses the same original hit test as touch.
+            int bit = 1 << i;
+            if ((next & bit) != (mouseButtons & bit)) nativeMouseButton(i, (next & bit) != 0);
+        }
+        mouseButtons = next;
+        if (pauseClick && nativeRaceMenuSelect(x, y)) {
+            nativeKey(13, true);
+            nativeKey(13, false);
+        }
+        if (action == MotionEvent.ACTION_SCROLL) nativeWheel(Math.round(event.getAxisValue(MotionEvent.AXIS_VSCROLL) * 120));
         return true;
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (nameDialog != null || inputDialog != null) return super.dispatchTouchEvent(event);
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            hardwareInput();
+            if (touchEditor) return drivingControls.handleMotion(event);
+            if (portSettings.isFull()) return portSettings.onTouch(event);
+            return mouseMotion(surface, event);
+        }
+        if (hardwareInput && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            cancelInput();
+            hardwareInput = false;
+            drivingControls.setHardwareInput(false);
+            syncMenu();
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     @Override public boolean onTouch(View view, MotionEvent event) {
         if (touchEditor) return drivingControls.handleMotion(event);
         if (portSettings.isFull()) return portSettings.onTouch(event);
         if ((event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) {
-            nativeTouchMode(false);
+            hardwareInput();
             return mouseMotion(view, event);
         }
         // Editor picture buttons require the original mouse-present state.
         nativeTouchMode(!touchMenu.isEditor());
-        if (mousePointer >= 0) nativeButton(false);
-        mousePointer = -1;
         if (sceneControls.getVisibility() == View.VISIBLE && sceneControls.handleMotion(event)) return true;
         if (drivingControls.getVisibility() == View.VISIBLE && drivingControls.handleMotion(event)) {
             if (touchMenu.awaitingRaceStart()) touchMenu.onDrivingInput();
@@ -795,12 +943,48 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         return touchMenu.handleMotion(event);
     }
 
-    @Override public boolean onGenericMotionEvent(MotionEvent event) {
-        if ((event.getSource() & (InputDevice.SOURCE_GAMEPAD | InputDevice.SOURCE_JOYSTICK)) != 0) {
-            nativeTouchMode(false);
-            drivingControls.setEnabled(false);
+    private void hardwareInput() {
+        nativeTouchMode(false);
+        if (hardwareInput) return;
+        cancelInput();
+        hardwareInput = true;
+        drivingControls.setHardwareInput(true);
+        syncMenu();
+    }
+
+    private void settingsPadMotion(MotionEvent event) {
+        float x = event.getAxisValue(MotionEvent.AXIS_HAT_X), y = event.getAxisValue(MotionEvent.AXIS_HAT_Y);
+        if (x == 0 && y == 0) { x = event.getAxisValue(MotionEvent.AXIS_X); y = event.getAxisValue(MotionEvent.AXIS_Y); }
+        int next = event.getActionMasked() == MotionEvent.ACTION_CANCEL ? 0 :
+            (x < -.5f ? 4 : x > .5f ? 8 : 0) | (y < -.5f ? 1 : y > .5f ? 2 : 0);
+        int[] keys = {38, 40, 37, 39};
+        for (int i = 0; i < keys.length; ++i)
+            if (((next ^ settingsDirections) & (1 << i)) != 0) portSettings.onKey(keys[i], (next & (1 << i)) != 0);
+        settingsDirections = next;
+    }
+
+    @Override public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (nameDialog != null || inputDialog != null) return super.dispatchGenericMotionEvent(event);
+        if (event.isFromSource(InputDevice.SOURCE_JOYSTICK)) {
+            hardwareInput();
+            if (touchEditor) return true;
+            if (portSettings.isFull()) { settingsPadMotion(event); return true; }
+            return gamepad.motion(event) || super.dispatchGenericMotionEvent(event);
         }
-        return super.onGenericMotionEvent(event);
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            hardwareInput();
+            if (touchEditor) return true;
+            if (portSettings.isFull()) {
+                if (event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+                    int direction = event.getAxisValue(MotionEvent.AXIS_VSCROLL) > 0 ? 38 : 40;
+                    if (event.getAxisValue(MotionEvent.AXIS_VSCROLL) != 0) portSettings.onKey(direction, true);
+                    return true;
+                }
+                return super.dispatchGenericMotionEvent(event);
+            }
+            return mouseMotion(surface, event) || super.dispatchGenericMotionEvent(event);
+        }
+        return super.dispatchGenericMotionEvent(event);
     }
 
     private void back() {
@@ -825,12 +1009,30 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     @Override public void onBackPressed() { back(); }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (nameDialog != null || inputDialog != null) return super.dispatchKeyEvent(event);
+        if (event.getAction() == KeyEvent.ACTION_MULTIPLE && event.getCharacters() != null && nativeTextEditorWanted()) {
+            nativeText(event.getCharacters());
+            return true;
+        }
+        if (GamepadInput.isController(event)) {
+            hardwareInput();
+            if (touchEditor) return true;
+            if (portSettings.isFull()) {
+                int mask = GamepadInput.button(event.getKeyCode());
+                int key = mask == 0x1000 ? 13 : mask == 0x2000 ? 27 :
+                    mask == 1 ? 38 : mask == 2 ? 40 : mask == 4 ? 37 : mask == 8 ? 39 : 0;
+                if (key != 0) portSettings.onKey(key, event.getAction() == KeyEvent.ACTION_DOWN);
+                return key != 0 || super.dispatchKeyEvent(event);
+            }
+            if (gamepad.key(event)) return true;
+        }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) back();
             return true;
         }
         int vk = virtualKey(event.getKeyCode());
         if (vk == 0) return super.dispatchKeyEvent(event);
+        hardwareInput();
         if (vk == 27) {
             if (event.getAction() == KeyEvent.ACTION_UP) back();
             return true;
@@ -838,6 +1040,12 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         if (touchEditor) return true;
         if (portSettings.isFull()) portSettings.onKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
         else {
+            int character = event.getUnicodeChar();
+            if (!event.isCtrlPressed() && !event.isAltPressed() && character >= 32 &&
+                Character.isValidCodePoint(character) && nativeTextEditorWanted()) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) nativeText(new String(Character.toChars(character)));
+                return true;
+            }
             touchMenu.onNativeKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
             if (!portSettings.isFull()) nativeKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
         }
@@ -900,6 +1108,46 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         if (code == KeyEvent.KEYCODE_SPACE) return 32;
         if (code == KeyEvent.KEYCODE_TAB) return 9;
         if (code == KeyEvent.KEYCODE_DEL) return 8;
+        if (code >= KeyEvent.KEYCODE_F1 && code <= KeyEvent.KEYCODE_F12) return 0x70 + code - KeyEvent.KEYCODE_F1;
+        if (code >= KeyEvent.KEYCODE_NUMPAD_0 && code <= KeyEvent.KEYCODE_NUMPAD_9) return 0x60 + code - KeyEvent.KEYCODE_NUMPAD_0;
+        switch (code) {
+            case KeyEvent.KEYCODE_SHIFT_LEFT: return 0xA0;
+            case KeyEvent.KEYCODE_SHIFT_RIGHT: return 0xA1;
+            case KeyEvent.KEYCODE_CTRL_LEFT: return 0xA2;
+            case KeyEvent.KEYCODE_CTRL_RIGHT: return 0xA3;
+            case KeyEvent.KEYCODE_ALT_LEFT: return 0xA4;
+            case KeyEvent.KEYCODE_ALT_RIGHT: return 0xA5;
+            case KeyEvent.KEYCODE_CAPS_LOCK: return 0x14;
+            case KeyEvent.KEYCODE_NUM_LOCK: return 0x90;
+            case KeyEvent.KEYCODE_SCROLL_LOCK: return 0x91;
+            case KeyEvent.KEYCODE_SYSRQ: return 0x2C;
+            case KeyEvent.KEYCODE_BREAK: return 0x13;
+            case KeyEvent.KEYCODE_PAGE_UP: return 0x21;
+            case KeyEvent.KEYCODE_PAGE_DOWN: return 0x22;
+            case KeyEvent.KEYCODE_MOVE_HOME: return 0x24;
+            case KeyEvent.KEYCODE_MOVE_END: return 0x23;
+            case KeyEvent.KEYCODE_INSERT: return 0x2D;
+            case KeyEvent.KEYCODE_FORWARD_DEL: return 0x2E;
+            case KeyEvent.KEYCODE_MINUS: return 0xBD;
+            case KeyEvent.KEYCODE_EQUALS: return 0xBB;
+            case KeyEvent.KEYCODE_LEFT_BRACKET: return 0xDB;
+            case KeyEvent.KEYCODE_RIGHT_BRACKET: return 0xDD;
+            case KeyEvent.KEYCODE_BACKSLASH: return 0xDC;
+            case KeyEvent.KEYCODE_SEMICOLON: return 0xBA;
+            case KeyEvent.KEYCODE_APOSTROPHE: return 0xDE;
+            case KeyEvent.KEYCODE_GRAVE: return 0xC0;
+            case KeyEvent.KEYCODE_COMMA: return 0xBC;
+            case KeyEvent.KEYCODE_PERIOD: return 0xBE;
+            case KeyEvent.KEYCODE_SLASH: return 0xBF;
+            case KeyEvent.KEYCODE_NUMPAD_MULTIPLY: return 0x6A;
+            case KeyEvent.KEYCODE_NUMPAD_ADD: return 0x6B;
+            case KeyEvent.KEYCODE_NUMPAD_SUBTRACT: return 0x6D;
+            case KeyEvent.KEYCODE_NUMPAD_DOT: case KeyEvent.KEYCODE_NUMPAD_COMMA: return 0x6E;
+            case KeyEvent.KEYCODE_NUMPAD_DIVIDE: return 0x6F;
+            case KeyEvent.KEYCODE_NUMPAD_ENTER: return 0x0C;
+            case KeyEvent.KEYCODE_NUMPAD_EQUALS: return 0xBB;
+            default: break;
+        }
         if (code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z) return 'A' + code - KeyEvent.KEYCODE_A;
         if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9) return '0' + code - KeyEvent.KEYCODE_0;
         return 0;

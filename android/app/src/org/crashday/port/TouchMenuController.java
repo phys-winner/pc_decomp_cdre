@@ -342,7 +342,11 @@ final class TouchMenuController {
             if (dragging && gestureControl == 1) GameActivity.nativeButton(false);
             if (dragging && gestureControl == 2) stepOption(lastX);
             if (!swiping && !holding && !dragging) {
-                if (screen == WRECKED || screen == FINISHED) {
+                if (GameActivity.nativeProfileHit(activity.pointerX(lastX), activity.pointerY(lastY))) {
+                    pointer = -1;
+                    activity.editPlayerName();
+                    return true;
+                } else if (screen == WRECKED || screen == FINISHED) {
                     pulse(RACE_CONTINUE);
                 } else if (screen == INTRO_CONTROLLER || GameActivity.nativeUiScene() == INTRO_CONTROLLER) {
                     pulse(PAD_START);

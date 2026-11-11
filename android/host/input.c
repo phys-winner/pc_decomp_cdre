@@ -115,6 +115,8 @@ void void_input_cancel(void)
     pthread_mutex_lock(&input_lock);
     __atomic_add_fetch(&android_input_epoch, 1, __ATOMIC_RELEASE);
     key_head = key_count = 0;
+    memset(physical_keys, 0, sizeof physical_keys);
+    memset(physical_buttons, 0, sizeof physical_buttons);
     for (unsigned vk = 0; vk < 256; ++vk) if (vk_down[vk]) key_locked(vk, 0);
     memset(key_down_frame, 0, sizeof key_down_frame);
     extern void crashday_text_editor_request(uint32_t);
@@ -812,6 +814,18 @@ void void_input_pump(void)
         pthread_mutex_lock(&input_lock);
     }
     uint32_t video = MEM32(0x870268u);
+    extern int crashday_ui_scene_current(void);
+    int scene = crashday_ui_scene_current(), pointing_menu = scene != 9;
+    int ui_buttons = pointing_menu && scene != 7 && scene != 14 && scene != 17 && scene != 18 && scene != 20;
+    /* Relative gameplay consumes DI movement; absolute UI warps must not block its buttons. */
+    if (!pointing_menu && MEM32(0x926A2Cu)) {
+        while (motion_count) {
+            motion_ack = motion_queue[motion_head].serial;
+            motion_head = (motion_head + 1) & 255;
+            --motion_count;
+        }
+        motion_inflight = 0;
+    }
     if (motion_inflight && video && void_vm_readable(video + 0x18, 8) &&
         MEM32(video + 0x18) == motion_queue[motion_head].x && MEM32(video + 0x1C) == motion_queue[motion_head].y) {
         motion_ack = motion_inflight;
@@ -829,7 +843,7 @@ void void_input_pump(void)
         }
         uint32_t bit = 1u << event.button;
         if (!event.down && (delivered_buttons & bit) && down_epoch[event.button] == event.epoch &&
-            (!(MEM32(0x926A28u) & bit) || !(observed_buttons & bit) ||
+            ((ui_buttons && event.button < 2 && (!(MEM32(0x926A28u) & bit) || !(observed_buttons & bit))) ||
              (g_d3d_device && g_d3d_device->frame - down_frame[event.button] < 2))) break;
         mouse_button_locked(event.button, event.down);
         if (!event.down && event.button == 0 && (delivered_buttons & bit) &&
@@ -877,8 +891,6 @@ void void_input_pump(void)
     if (editor_up && !button_count && editor_epoch == __atomic_load_n(&android_input_epoch, __ATOMIC_ACQUIRE)) {
         crashday_text_editor_request(editor_epoch);
     }
-    extern int crashday_ui_scene_current(void);
-    int pointing_menu = crashday_ui_scene_current() != 9;
     if (!motion_inflight && motion_count && sdl_window && (!MEM32(0x926A2C) || pointing_menu) && void_dispatch_find(0x006F0B80u)) {
         crashday_motion_event event = motion_queue[motion_head];
         /* Original UI projection is 640x480; 00491EF0 applies X aspect and
@@ -1334,6 +1346,9 @@ static int drive_connected;
 static uint16_t drive_buttons, drive_pulse_buttons, drive_overlay_buttons;
 static uint16_t drive_pulse_seen;
 static uint32_t drive_pulse_frame[16];
+static float drive_pulse_triggers[2];
+static unsigned drive_trigger_seen;
+static uint32_t drive_trigger_frame[2];
 static uint8_t drive_fallback_keys[256];
 
 static void drive_fallback_key(uint32_t vk, int down)
@@ -1363,6 +1378,8 @@ void void_input_drive_active(int active)
         drive_pulse_seen = 0;
         drive_steer = drive_left_y = drive_right_x = drive_right_y = 0;
         drive_throttle = drive_brake = 0;
+        drive_pulse_triggers[0] = drive_pulse_triggers[1] = 0;
+        drive_trigger_seen = 0;
     }
     pthread_mutex_unlock(&input_lock);
 }
@@ -1384,9 +1401,11 @@ void void_input_pad_buttons(uint32_t mask, int down)
 void void_input_gamepad_reset(void)
 {
     pthread_mutex_lock(&input_lock);
-    if (drive_buttons || drive_pulse_buttons || drive_overlay_buttons) ++drive_packet;
+    if (drive_buttons || drive_pulse_buttons || drive_overlay_buttons || drive_pulse_triggers[0] || drive_pulse_triggers[1]) ++drive_packet;
     drive_buttons = drive_pulse_buttons = drive_overlay_buttons = 0;
     drive_pulse_seen = 0;
+    drive_pulse_triggers[0] = drive_pulse_triggers[1] = 0;
+    drive_trigger_seen = 0;
     pthread_mutex_unlock(&input_lock);
 }
 
@@ -1424,6 +1443,13 @@ void void_input_controller(uint32_t buttons, float left_x, float left_y, float r
     else drive_fallback(left_x, right_trigger, left_trigger);
     pthread_mutex_lock(&input_lock);
     ++drive_packet;
+    float triggers[] = {left_trigger, right_trigger}, previous[] = {drive_brake, drive_throttle};
+    for (unsigned i = 0; i < 2; ++i) {
+        if (triggers[i] > 0 && previous[i] == 0) {
+            drive_pulse_triggers[i] = triggers[i];
+            drive_trigger_seen &= ~(1u << i);
+        } else if (drive_pulse_triggers[i] > 0) drive_pulse_triggers[i] = fmaxf(drive_pulse_triggers[i], triggers[i]);
+    }
     drive_pulse_buttons |= (uint16_t)buttons & (uint16_t)~drive_overlay_buttons;
     drive_pulse_seen &= (uint16_t)~((uint16_t)buttons & (uint16_t)~drive_overlay_buttons);
     drive_overlay_buttons = (uint16_t)buttons;
@@ -1496,7 +1522,23 @@ int void_input_touch_pad_snapshot(uint32_t index, uint8_t out[16], int consume)
         int16_t y = (int16_t)lrintf(drive_left_y * 32767);
         int16_t right_x = (int16_t)lrintf(drive_right_x * 32767);
         int16_t right_y = (int16_t)lrintf(drive_right_y * 32767);
-        uint8_t throttle = (uint8_t)lrintf(drive_throttle * 255), brake = (uint8_t)lrintf(drive_brake * 255);
+        float triggers[] = {drive_brake, drive_throttle};
+        /* Digital-only trigger taps can finish between polls, just like face buttons. */
+        for (unsigned i = 0; i < 2; ++i) if (drive_pulse_triggers[i] > 0) {
+            if (consume) {
+                uint32_t frame = void_input_frame();
+                if (!(drive_trigger_seen & (1u << i))) {
+                    drive_trigger_seen |= 1u << i;
+                    drive_trigger_frame[i] = frame;
+                } else if (frame - drive_trigger_frame[i] >= 2) {
+                    drive_pulse_triggers[i] = 0;
+                    drive_trigger_seen &= ~(1u << i);
+                    ++drive_packet;
+                }
+            }
+            triggers[i] = fmaxf(triggers[i], drive_pulse_triggers[i]);
+        }
+        uint8_t throttle = (uint8_t)lrintf(triggers[1] * 255), brake = (uint8_t)lrintf(triggers[0] * 255);
         uint16_t buttons = drive_buttons | drive_overlay_buttons | drive_pulse_buttons;
         memcpy(out, &drive_packet, 4);
         memcpy(out + 4, &buttons, 2);

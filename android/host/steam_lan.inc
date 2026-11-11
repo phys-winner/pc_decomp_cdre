@@ -82,6 +82,7 @@ typedef struct {
 } lan_event;
 typedef struct lan_context {
     lan_socket udp, listener;
+    char name[64];
     uint32_t bind_ip;
     uint64_t id, joined, next_call, search_call, search_until, join_call, join_until;
     uint64_t advertised, swept, heartbeat;
@@ -555,7 +556,9 @@ static uint64_t lan_create(lan_context *c,int type,int limit)
     lan_leave(c);uint64_t id=LAN_LOBBY_PREFIX|(uint32_t)c->id;
     lan_lobby *l=lan_lobby_slot(c,id);if(!l){lan_put32(event,2);lan_event_add(c,513,call,event,16);return call;}
     l->owner=c->id;l->heard=lan_now();l->ip=c->bind_ip;l->limit=limit;l->type=type;l->joinable=1;l->count=1;
-    l->members[0].id=c->id;l->members[0].ip=c->bind_ip;snprintf(l->members[0].name,64,"LAN %04X",(unsigned)c->id&65535);
+    l->members[0].id=c->id;l->members[0].ip=c->bind_ip;
+    if (*c->name) snprintf(l->members[0].name,64,"%s",c->name);
+    else snprintf(l->members[0].name,64,"LAN %04X",(unsigned)c->id&65535);
     c->joined=id;lan_put32(event,1);lan_put64(event+8,id);lan_event_add(c,513,call,event,16);lan_event_enter(c,id,0,1);return call;
 }
 static uint64_t lan_search(lan_context *c)
@@ -571,7 +574,9 @@ static uint64_t lan_join(lan_context *c,uint64_t id)
 {
     lan_leave(c);uint64_t call=c->next_call++;lan_lobby *l=lan_lobby_find(c,id);
     if(!l || !l->owner){lan_event_enter(c,id,call,2);return call;}
-    char name[64];snprintf(name,sizeof name,"LAN %04X",(unsigned)c->id&65535);
+    char name[64];
+    if (*c->name) snprintf(name,sizeof name,"%s",c->name);
+    else snprintf(name,sizeof name,"LAN %04X",(unsigned)c->id&65535);
     if(!lan_send(c,l->owner,l->ip,LAN_JOIN,id,name,(uint32_t)strlen(name))){lan_event_enter(c,id,call,2);return call;}
     c->joined=id;c->join_call=call;c->join_until=lan_now()+10000;return call;
 }

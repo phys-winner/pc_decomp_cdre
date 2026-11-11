@@ -140,7 +140,26 @@ int main(void) {
     assert(MEM32(0x926A0C)==0x3000);
     assert(motion_calls==1 && MEM32(0x926A2C)==1 && MEM32(0x926A30)==1);
     void_input_pump();assert(!motion_count);
-    guest_scene=9;void_input_mouse_warp(300,200);void_input_pump();assert(motion_calls==1);
+    guest_scene=9;void_input_mouse_warp(300,200);
+    void_input_mouse_button(0,1);void_input_mouse_button(0,0);void_input_pump();
+    assert(motion_calls==1 && !motion_count && mouse_buttons[0] && button_count==1);
+    MEM32(0x926A28)=observed_buttons=0;device.frame+=2;void_input_pump();
+    assert(!mouse_buttons[0] && !button_count);
+    for(int scene=7;scene<=20;++scene) {
+        if(scene!=7 && scene!=14 && scene!=17 && scene!=18 && scene!=20)continue;
+        guest_scene=scene;
+        for(int button=0;button<5;++button) {
+            void_input_mouse_button(button,1);void_input_mouse_button(button,0);void_input_pump();
+            assert(mouse_buttons[button] && button_count==1);
+            device.frame+=2;void_input_pump();assert(!mouse_buttons[button] && !button_count);
+        }
+    }
+    guest_scene=8;
+    for(int button=2;button<5;++button) {
+        void_input_mouse_button(button,1);void_input_mouse_button(button,0);void_input_pump();
+        assert(mouse_buttons[button] && button_count==1);
+        device.frame+=2;void_input_pump();assert(!mouse_buttons[button] && !button_count);
+    }
     neutral();
     puts("PASS input queues: overflow, neutral release, next tap, low-FPS guard and reentrant guest cancel/overflow");
     return 0;

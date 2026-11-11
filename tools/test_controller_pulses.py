@@ -49,6 +49,9 @@ static void send(uint16_t buttons){void_input_controller(buttons,0,0,0,0,0,0);}
 int main(void){
     const uint16_t START=0x10,A=0x1000,B=0x2000,RB=0x200;
     CHECK(poll()==0,"cold-start controller is present and neutral");
+    CHECK(!xinput_capabilities(0,0,64),"neutral capabilities query succeeds");
+    CHECK(MEM16(68)==0xF3FF && MEM8(70)==255 && MEM8(71)==255,"neutral capabilities expose all buttons and triggers");
+    for(unsigned axis=72;axis<80;axis+=2)CHECK(MEM16(axis)==32767,"neutral capabilities expose every stick axis");
     for(unsigned i=6;i<16;++i)CHECK(state[i]==0,"cold-start analog state is neutral");
     CHECK(!void_input_touch_pad(1,state),"only controller zero is exposed");
     void_input_drive_active(1);
@@ -129,8 +132,22 @@ int main(void){
     frame+=3;
     CHECK(!xinput_get_state(0,16) && MEM16(20)==(A|B),"all metadata calls preserve simultaneous tap");
     frame+=2;CHECK(!xinput_get_state(0,16) && !MEM16(20),"simultaneous GetState delivery expires");
+    for(unsigned trigger=0;trigger<2;++trigger){
+        void_input_controller(0x10000,0,0,0,0,trigger==0?.8f:0,trigger==1?.8f:0);
+        send(0);frame+=100;
+        CHECK(!xinput_capabilities(0,0,64),"trigger metadata succeeds without consuming a tap");
+        frame+=3;CHECK(poll()==0 && state[6+trigger]==204,"short digital trigger survives before its first poll");
+        CHECK(poll()==0 && state[6+trigger]==204,"trigger same-frame poll is stable");
+        ++frame;poll();CHECK(state[6+trigger]==204,"trigger next-frame poll is stable");
+        ++frame;poll();CHECK(!state[6+trigger],"trigger expires after its own two observed frames");
+        void_input_controller(0x10000,0,0,0,0,trigger==0?1:0,trigger==1?1:0);poll();
+        frame+=2;poll();CHECK(state[6+trigger]==255,"held trigger outlives pulse");
+        send(0);poll();CHECK(!state[6+trigger],"long-held trigger releases without a new pulse");
+    }
+    void_input_controller(0x10000,0,0,0,0,1,1);send(0);void_input_gamepad_reset();poll();
+    CHECK(!state[6] && !state[7],"cancel clears both pending trigger taps");
     CHECK(!input_lock,"all input locks released");
-    puts("PASS: frame-stable pulses, held release, cancellation, staggered bits, rapid repress, late polling, frame wrap, neutral presence and non-consuming metadata");
+    puts("PASS: frame-stable button/trigger pulses, held release, cancellation, staggered bits, rapid repress, late polling, frame wrap, neutral presence and non-consuming metadata");
     return 0;
 }
 '''

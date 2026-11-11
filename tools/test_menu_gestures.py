@@ -48,12 +48,14 @@ public final class MenuGesturesProbe {
     static final class Window {Decor getDecorView(){return new Decor();}}
     static final class Activity {
         Menu menu;
+        void editPlayerName(){}
         Resources getResources(){return new Resources();} Window getWindow(){return new Window();}
         float pointerX(float x){return x/1000;} float pointerY(float y){return y/500;}
         void syncMenu(){if(menu!=null)menu.syncNativeScene();} void markIntroSeen(){} void closePortSettings(){}
         void openTextEditor(){} void closeTextEditor(){}
     }
     static final class GameActivity {
+        static boolean nativeProfileHit(float x,float y){return false;}
         static int downs,ups,wheel,cancels,deletes,options,scroll; static float x,y;
         static int scene=-1;static int nativeUiScene(){return scene;}static boolean nativeTextEditorWanted(){return false;}
         static boolean nativeMenuScroll(int steps){scroll+=steps;return control==3;}
@@ -194,7 +196,7 @@ public final class MenuSyncProbe {
     static final class Launch {void firstFrame(Object root){}void exited(int result){}}
     final Settings portSettings=new Settings();final View driveButton=new View(),status=new View(),continueButton=new View();final Driving drivingControls=new Driving();final Menu touchMenu=new Menu();final Scenes sceneControls=new Scenes();
     final Handler handler=new Handler();final Launch launch=new Launch();final Object root=new Object();
-    boolean touchEditor,gameReady=true,started=true,launcherVisible;static int pending;static boolean touchHud,countdown;
+    boolean touchEditor,hardwareInput,gameReady=true,started=true,launcherVisible;static int pending;static boolean touchHud,countdown;
     static int nativeStatus(){return Integer.MAX_VALUE;}static boolean nativeLauncherClick(){return false;}
     String tr(String en,String ru){return en;}
     static void nativeDriving(boolean active){if(!active)pending=0;}
@@ -202,6 +204,7 @@ public final class MenuSyncProbe {
     static int nativeRaceWeapons(){return 0x0300;}
     static boolean nativeRaceCountdown(){return countdown;}
     void pollRefreshRate(){}
+    void offerTouchVisibility(){}
     static int nativeReplayState(){return 0;}
     /* SYNC */
     /* PROGRESS */

@@ -28,6 +28,7 @@ static float steer,gas,brake;
 static void drive_fallback(float a,float b,float c){steer=a;gas=b;brake=c;}
 static unsigned drive_packet;
 static uint16_t drive_pulse_buttons,drive_pulse_seen,drive_overlay_buttons;
+static float drive_pulse_triggers[2];static unsigned drive_trigger_seen;
 static float drive_steer,drive_left_y,drive_right_x,drive_right_y,drive_brake,drive_throttle;
 /* FUNCTION */
 int main(void){

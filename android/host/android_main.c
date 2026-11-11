@@ -1306,6 +1306,55 @@ JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeRightButton(JNI
     void_input_mouse_button(1, down);
 }
 
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeMouseButton(JNIEnv *env, jclass type, jint button, jboolean down)
+{
+    (void)env; (void)type;
+    if (button >= 0 && button < 5) void_input_mouse_button(button, down);
+}
+
+JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeProfileHit(JNIEnv *env, jclass type, jfloat x, jfloat y)
+{
+    (void)env; (void)type;
+    if (!game_started || !isfinite(x) || !isfinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return JNI_FALSE;
+    void_machine_enter();
+    uint32_t renderer = MEM32(0x870260u);
+    float width = renderer && void_vm_readable(renderer + 0xE4, 4) ? 640 * MEMF(renderer + 0xE4) : 0;
+    /* MainMenu.cpp draws the 19x18 avatar border at (viewport width - 28, 24). */
+    int hit = crashday_ui_scene(NULL) == 0 && isfinite(width) && width >= 640 &&
+        x * width >= width - 36 && x * width <= width - 4 && y * 480 >= 18 && y * 480 <= 50;
+    void_machine_leave();
+    return hit ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_org_crashday_port_GameActivity_nativePlayerNameGet(JNIEnv *env, jclass type)
+{
+    (void)type;
+    extern const char *void_steam_player_name(void);
+    void_machine_enter();
+    const char *name = void_steam_player_name();
+    jsize length = (jsize)strlen(name);
+    jbyteArray result = (*env)->NewByteArray(env, length);
+    if (result) (*env)->SetByteArrayRegion(env, result, 0, length, (const jbyte *)name);
+    void_machine_leave();
+    return result;
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativePlayerName(JNIEnv *env, jclass type, jbyteArray utf8)
+{
+    (void)type;
+    if (!utf8) return;
+    jsize length = (*env)->GetArrayLength(env, utf8);
+    if (length < 0 || length > 63) return;
+    char name[64] = {0};
+    (*env)->GetByteArrayRegion(env, utf8, 0, length, (jbyte *)name);
+    if ((*env)->ExceptionCheck(env)) return;
+    for (jsize i = 0; i < length; ++i) if ((unsigned char)name[i] < 32 || name[i] == 127) return;
+    extern void void_steam_player_name_set(const char *);
+    if (game_started) void_machine_enter();
+    void_steam_player_name_set(name);
+    if (game_started) void_machine_leave();
+}
+
 JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeWheel(JNIEnv *env, jclass type, jint delta)
 {
     (void)env;
