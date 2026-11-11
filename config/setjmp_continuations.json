@@ -1,0 +1,12 @@
+{
+  "continuations": [
+    {"module": "d3dx9", "owner": 302876839, "continuation": 302876942},
+    {"module": "d3dx9", "owner": 302877663, "continuation": 302877841},
+    {"module": "d3dx9", "owner": 302880558, "continuation": 302880641},
+    {"module": "d3dx9", "owner": 302881174, "continuation": 302881318},
+    {"module": "d3dx9", "owner": 303471092, "continuation": 303471166},
+    {"module": "d3dx9", "owner": 303471092, "continuation": 303471448},
+    {"module": "d3dx9", "owner": 303476326, "continuation": 303476400},
+    {"module": "d3dx9", "owner": 303476326, "continuation": 303476788}
+  ]
+}

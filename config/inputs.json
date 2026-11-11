@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "game": "Crashday",
+  "version": "1.5.44",
+  "source_root": "C:/Program Files (x86)/Steam/steamapps/common/Crashday",
+  "original_copy": "original/game",
+  "main_executable": "crashday.exe",
+  "main_executable_sha256": "812e92bfc56fa6db052d125822b4c69b80743857d62610031aad9c842da01259"
+}

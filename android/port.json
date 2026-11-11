@@ -1,0 +1,212 @@
+{
+  "schema": 1,
+  "app": {
+    "label": "Crashday",
+    "title": "Crashday",
+    "subtitle": {
+      "en": "Crashday 1.5.44 ARM64",
+      "ru": "Crashday 1.5.44 ARM64"
+    },
+    "logTag": "Crashday",
+    "storage": "Crashday",
+    "github": "phys-winner/pc_decomp_cdre",
+    "languages": [
+      "en",
+      "ru"
+    ],
+    "hooks": "org.crashday.port.LauncherHooks",
+    "allFilesAccess": true,
+    "autoLaunch": false,
+    "processes": {
+      "launcher": ":launcher"
+    },
+    "licenses": [
+      {
+        "path": "crashday-third-party-notices.txt",
+        "title": "Crashday"
+      },
+      {
+        "path": "pcrecomp-LICENSE",
+        "title": "pcrecomp"
+      },
+      {
+        "path": "mojoshader-LICENSE.txt",
+        "title": "MojoShader"
+      },
+      {
+        "path": "astcenc-LICENSE.txt",
+        "title": "ASTC Encoder"
+      },
+      {
+        "path": "etcpak-LICENSE.txt",
+        "title": "etcpak"
+      },
+      {
+        "path": "NFSMW-Recompiled-Mobile-LICENSE",
+        "title": "NFSMW-Recompiled-Mobile touch controls (GPLv3)"
+      }
+    ],
+    "localNetwork": true
+  },
+  "theme": {
+    "background": [
+      "#351710",
+      "#180C09",
+      "#070404"
+    ],
+    "card": "#EB1D100C",
+    "cardStroke": "#6EE07840",
+    "cell": "#35211A",
+    "accent": "#F08048",
+    "accentDark": "#A84020",
+    "primaryFill": "#482015",
+    "playGlow": "#F08048",
+    "playParticles": "#FFE0B0",
+    "text": "#FFFFFF",
+    "muted": "#C8B4AA",
+    "error": "#FF7D6E",
+    "titleFont": "sans-serif-medium"
+  },
+  "distributions": [
+    {
+      "id": "crashday",
+      "title": "Crashday",
+      "version": "1.5.44",
+      "activity": "org.crashday.port.GameActivity",
+      "renderers": [
+        "gles"
+      ],
+      "parts": [
+        {
+          "id": "game",
+          "title": {
+            "en": "Game files",
+            "ru": "Файлы игры"
+          },
+          "folder": "{storage}/game",
+          "marker": "data/dat000.cpk",
+          "required": [
+            "data/dat000.cpk",
+            "data/dat003.cpk",
+            "user/amateurs2.trk"
+          ],
+          "needed": [
+            "data/",
+            "user/"
+          ]
+        }
+      ]
+    }
+  ],
+  "renderers": {
+    "default": "gles",
+    "modes": [
+      {
+        "id": "gles",
+        "kind": "gles",
+        "title": "OpenGL ES",
+        "description": {
+          "en": "Direct3D 9 through the port's native OpenGL ES renderer.",
+          "ru": "Direct3D 9 через собственный рендерер OpenGL ES."
+        }
+      }
+    ]
+  },
+  "textures": {
+    "backend": "org.crashday.port.CrashdayTextureBackend"
+  },
+  "hints": {
+    "gameFiles": {
+      "en": "Choose the Crashday installation folder or a ZIP with data and user.",
+      "ru": "Выберите папку установки Crashday или ZIP с data и user."
+    },
+    "options": {
+      "en": "Driving controls, button positions, sizes and transparency are adjustable in Options → Additional settings. Language changes apply at the next game start.",
+      "ru": "Управление, позиции, размеры и прозрачность кнопок доступны в Настройки → Дополнительные настройки. Язык применяется при следующем запуске игры."
+    }
+  },
+  "options": [
+    {
+      "key": "game_language",
+      "type": "choice",
+      "default": "system",
+      "title": {
+        "en": "Game language",
+        "ru": "Язык игры"
+      },
+      "choices": [
+        {
+          "value": "system",
+          "title": {
+            "en": "System (English fallback)",
+            "ru": "Системный (резервный — английский)"
+          }
+        },
+        {
+          "value": "english",
+          "title": "English"
+        },
+        {
+          "value": "german",
+          "title": "Deutsch"
+        },
+        {
+          "value": "italian",
+          "title": "Italiano"
+        },
+        {
+          "value": "russian",
+          "title": "Русский"
+        },
+        {
+          "value": "turkish",
+          "title": "Türkçe"
+        },
+        {
+          "value": "hungarian",
+          "title": "Magyar"
+        },
+        {
+          "value": "brazilian",
+          "title": "Português (Brasil)"
+        },
+        {
+          "value": "spanish",
+          "title": "Español"
+        },
+        {
+          "value": "polish",
+          "title": "Polski"
+        }
+      ]
+    },
+    {
+      "key": "skip_splash",
+      "type": "bool",
+      "default": "0",
+      "title": {
+        "en": "Skip startup splash screen",
+        "ru": "Пропускать заставку при запуске"
+      }
+    },
+    {
+      "key": "large_address_aware",
+      "type": "bool",
+      "default": "0",
+      "defaultMinRamGiB": 5,
+      "arm64Only": true,
+      "title": {
+        "en": "4 GB address space",
+        "ru": "Адресное пространство 4 ГБ",
+        "de": "4 GB Adressraum",
+        "pl": "Przestrzeń adresowa 4 GB"
+      },
+      "hint": {
+        "en": "Allows the 32-bit game to use more than 2 GB. Applied at the next game start.",
+        "ru": "Позволяет 32-битной игре использовать более 2 ГБ. Применяется при следующем запуске игры.",
+        "de": "Erlaubt dem 32-Bit-Spiel mehr als 2 GB. Gilt ab dem nächsten Spielstart.",
+        "pl": "Pozwala 32-bitowej grze używać ponad 2 GB. Zacznie działać po ponownym uruchomieniu gry."
+      }
+    }
+  ]
+}

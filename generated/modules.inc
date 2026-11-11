@@ -1,0 +1,8 @@
+{"crashday.exe", "crashday.exe", 0x400000u, 1, 0},
+{"msvcr120.dll", "msvcr120.dll", 0x10000000u, 0, 0},
+{"msvcp120.dll", "msvcp120.dll", 0x11000000u, 0, 0},
+{"d3dx9_43.dll", "d3dx9_43.dll", 0x12000000u, 0, 0},
+{"D3DCompiler_43.dll", "D3DCompiler_43.dll", 0x14000000u, 0, 0},
+{"msvcrt.dll", "msvcrt.dll", 0x15000000u, 0, 0},
+{"D3DCompiler_41.dll", "D3DCompiler_41.dll", 0x16000000u, 0, 0},
+{"d3dx9_31.dll", "d3dx9_31.dll", 0x17000000u, 0, 0},

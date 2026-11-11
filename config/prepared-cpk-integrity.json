@@ -1,0 +1,32 @@
+[
+  {
+    "name": "dat000.cpk",
+    "sourceSha1": "e65b9e72cb00f90ee30424c9611d40e014e78946",
+    "preparedSha256": "f8cc9bb26e80249bd9c2aaf51db60cb7d3a4cb2c1bda573e8997c7c5cb6506f0"
+  },
+  {
+    "name": "dat002.cpk",
+    "sourceSha1": "a2d7aba2cf9794765687fdd764b2aaff6e4ae848",
+    "preparedSha256": "f8cd760e19dbca6dad3b10cbe2838057413c88469d1f689da75f5ece121d7563"
+  },
+  {
+    "name": "dat003.cpk",
+    "sourceSha1": "03272382ccb17b62e89e978d180aaa96645c49f9",
+    "preparedSha256": "162d9df66773577ad955053e4c78d3f4850f8111481af98e2b8e5a8af98c8b74"
+  },
+  {
+    "name": "dat004.cpk",
+    "sourceSha1": "1ce1ef90a6c5b9e6b9d084ef903a2865399a8a25",
+    "preparedSha256": "6d79cfd529378f3150d9d19ae5dc093df05d342cf44d87b5b1bd2cff16a7bba3"
+  },
+  {
+    "name": "dat005.cpk",
+    "sourceSha1": "63636528afd78f0da9b8e68bd64333cec2760d1c",
+    "preparedSha256": "1ec4ed3fb8881ec692f7d6d5b7377cbf9c04cd0e76221270dbb1ddaedeaecce0"
+  },
+  {
+    "name": "dat006.cpk",
+    "sourceSha1": "736ca1071e73df2707b9095ba406e88a555185c1",
+    "preparedSha256": "e8be4cbbfae9c9ac3f0732bd62e600ccee5a48f54df7401299a2dc53e6c2367c"
+  }
+]

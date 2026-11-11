@@ -1,0 +1,10 @@
+{
+  "java_exe": "C:/path/to/jdk/bin/java.exe",
+  "signer": {
+    "dir": "C:/path/to/signing",
+    "apksigner": "apksigner.jar",
+    "cert": "certificate.pem",
+    "key": "private-key.pk8",
+    "expected_cert_sha256": "REPLACE_WITH_64_HEXADECIMAL_CHARACTERS"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "launcher": {
+    "source": "../launcher",
+    "directory": "android/launcher",
+    "note": "Local template snapshot imported without network access. Adds a distribution-level embedded flag for APK-resident game data."
+  },
+  "astcenc": {
+    "url": "https://github.com/ARM-software/astc-encoder",
+    "version": "5.7.0",
+    "directory": "reference/astcenc",
+    "license": "Apache-2.0",
+    "note": "Vendored source subset copied from the existing local Heroes V snapshot; built with NEON for Android."
+  },
+  "etcpak": {
+    "url": "https://github.com/wolfpld/etcpak",
+    "revision": "3d716e1550023dc5ff8b602636af8b76584e0b66",
+    "directory": "reference/etcpak",
+    "license": "BSD-3-Clause; bundled bcdec.h is MIT OR Unlicense",
+    "note": "Vendored ETC2 encoder subset copied from the same local snapshot; no new fetch performed."
+  },
+  "control_reference": {
+    "source": "Real Racing 3 version 3.0.1 (historical design reference)",
+    "note": "Scheme names and pedal semantics come from data/text_en.txt lines 26-38. Crashday-specific XInput, UI and Horizon Tilt implementations are new; RR3 addresses and native patches are not reused."
+  }
+}

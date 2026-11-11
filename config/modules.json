@@ -1,0 +1,108 @@
+{
+  "modules": [
+    {
+      "name": "crashday",
+      "file": "crashday.exe",
+      "path": "original/recovered/crashday.exe",
+      "sha256": "8d1cfcda173be0765d851adea881efc6d6b5521ca911f9665c2632f6b700c966",
+      "base": "0x400000",
+      "exe": true
+    },
+    {
+      "name": "msvcr120",
+      "file": "msvcr120.dll",
+      "path": "original/dependencies/msvcr120.dll",
+      "sha256": "86e39b5995af0e042fcdaa85fe2aefd7c9ddc7ad65e6327bd5e7058bc3ab615f",
+      "base": "0x10000000",
+      "exe": false
+    },
+    {
+      "name": "msvcp120",
+      "file": "msvcp120.dll",
+      "path": "original/dependencies/msvcp120.dll",
+      "sha256": "87c42ca155473e4e71857d03497c8cbc28fa8ff7f2c8d72e8a1f39b71078f608",
+      "base": "0x11000000",
+      "exe": false
+    },
+    {
+      "name": "d3dx9",
+      "file": "d3dx9_43.dll",
+      "path": "original/dependencies/d3dx9_43.dll",
+      "sha256": "0b28546be22c71834501f7d7185ede5d79742457331c7ee09efc14490dd64f5f",
+      "base": "0x12000000",
+      "exe": false
+    },
+    {
+      "name": "d3dcompiler",
+      "file": "D3DCompiler_43.dll",
+      "path": "original/dependencies/D3DCompiler_43.dll",
+      "sha256": "2f23182ec6f4889397ac4bf03d62536136c5bdba825c7d2c4ef08c827f3a8a1c",
+      "base": "0x14000000",
+      "exe": false,
+      "jump_tables": [
+        {
+          "address": "0x140883d0",
+          "first_index": 0,
+          "count": 8,
+          "sha256": "3ca6f1a484d6ee9205f836009cdb21ab2a3119b486e9a0d1bd69f29675d0e0b3"
+        },
+        {
+          "address": "0x140883f0",
+          "first_index": 0,
+          "count": 8,
+          "sha256": "c064e91af3a4ab60da38078a67a9b6e9af07e9d298899326734d76a9136aea9f"
+        },
+        {
+          "address": "0x14088410",
+          "first_index": 0,
+          "count": 21,
+          "sha256": "7354bebad6472b0623e19f3988376e09fd9bfe078b3043cd678274f9bb48d2bf"
+        },
+        {
+          "address": "0x14135584",
+          "first_index": 0,
+          "count": 405,
+          "sha256": "63c8d7a1a866709a2b92281ab7a49cbfd9da74032cb6b6027f2423fa0db97f73"
+        }
+      ]
+    },
+    {
+      "name": "msvcrt",
+      "file": "msvcrt.dll",
+      "path": "original/dependencies/msvcrt.dll",
+      "sha256": "ee42755429a48f9101d014bfb0e6b9a8c639d28eebe954db928476d38271fc63",
+      "base": "0x15000000",
+      "exe": false
+    },
+    {
+      "name": "d3dcompiler41",
+      "file": "D3DCompiler_41.dll",
+      "source": "C:/Windows/SysWOW64/D3DCompiler_41.dll",
+      "sha256": "69ddadf8f5be24f10382706480b55e2492008d102001779f976608e880c65aab",
+      "base": "0x16000000",
+      "exe": false
+    },
+    {
+      "name": "d3dx9_31",
+      "file": "d3dx9_31.dll",
+      "source": "C:/Windows/SysWOW64/d3dx9_31.dll",
+      "sha256": "e2065619fe6eb0034833b1dc0369deb4a6edc3110e38a1132eeafcf430c578a5",
+      "base": "0x17000000",
+      "exe": false,
+      "jump_tables": [
+        {
+          "address": "0x17128af0",
+          "first_index": 0,
+          "count": 293,
+          "sha256": "f538c2dd2d3f11d09d05eecf2dc66983d76e7b47c6d8a2860892e6938e537de5"
+        },
+        {
+          "address": "0x171277dc",
+          "first_index": 0,
+          "count": 297,
+          "sha256": "c88dab998debf6e4d61aac63d5022afcaff864e7dead889c5fe93bced457b4e3"
+        }
+      ]
+    }
+  ]
+}
