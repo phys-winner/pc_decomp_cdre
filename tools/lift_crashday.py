@@ -126,6 +126,13 @@ def apply_stats_observation(address, text):
 
 
 def apply_host_adapter(spec, address, text):
+    if spec["name"] == "crashday" and address == 0x006057D0:
+        anchor = "L_00606101:\n"
+        if text.count(anchor) != 1:
+            raise ValueError("Workshop content loading boundary changed")
+        return text.replace(anchor, anchor +
+            "    { extern void crashday_workshop_load(uint32_t);\n"
+            "      RECOMP_REGS_OUT(); crashday_workshop_load(esi); RECOMP_REGS_IN(); }\n", 1)
     if spec["name"] == "crashday" and address == 0x005A97F0:
         signature = "void sub_005A97F0(void) {"
         if text.count(signature) != 1:

@@ -25,11 +25,13 @@ uint32_t void_vm_origin(uint32_t origin);
 #define WIN_MAX_PATH 260
 
 typedef struct { const char *win; char host[1024]; } mount_t;
-static mount_t mounts[9];
+static mount_t mounts[10];
 static int mount_count;
 static char game_root[1024], data_root[1024], overlay_root[1024];
 static char cwd[WIN_MAX_PATH] = "C:\\Games\\Crashday";
 static pthread_mutex_t cwd_lock = PTHREAD_MUTEX_INITIALIZER;
+
+#include "steam_workshop.inc"
 
 const char *void_root_dir(void) { return game_root; }
 const char *void_data_dir(void) { return data_root; }
@@ -311,6 +313,7 @@ int void_files_init(const char *game, const char *data)
 {
     snprintf(game_root, sizeof game_root, "%s", game);
     snprintf(data_root, sizeof data_root, "%s", data);
+    workshop_snapshot();
     /* Longest prefixes first. */
     add_mount("C:\\Users\\Player\\AppData\\Local\\Temp", "%s/Temp", data);
     add_mount("C:\\Users\\Player\\Documents", "%s/Documents", data);
@@ -321,6 +324,7 @@ int void_files_init(const char *game, const char *data)
     add_mount("C:\\Games\\replays", "%s/AppData/Local/Crashday", data);
     add_mount("C:\\Users\\Player\\AppData\\Local\\replays", "%s/AppData/Local/Crashday", data);
     add_mount("C:\\Games\\Crashday", "%s", game);
+    if (workshop_valid) add_mount("C:\\Workshop", "%s", workshop_root);
     add_mount("C:", "%s/drive_c", data);
     struct stat st;
     if ((stat(game_root, &st) || !S_ISDIR(st.st_mode)) && !listing_get(game_root, 1)) {
@@ -474,6 +478,7 @@ static char *to_host_ex(const char *windows_path, int flags, int *parent_exists,
         }
     }
     if (!best) return NULL;
+    if ((flags & RESOLVE_WRITE) && !strcmp(best->win, "C:\\Workshop")) return NULL;
     int cache_only = (flags & RESOLVE_CACHED_ONLY) != 0;
     if (cache_only && !cacheable(best->host)) return NULL;
     char *host = (char *)malloc(2048);
@@ -495,6 +500,12 @@ static char *to_host_ex(const char *windows_path, int flags, int *parent_exists,
     if (present < 0) { free(host); return NULL; }
     if (parent_exists) *parent_exists = ok;
     if (leaf) *leaf = present;
+    const workshop_entry *track = !(flags & RESOLVE_WRITE) && !present ? workshop_track(norm) : NULL;
+    if (track) {
+        snprintf(host, 2048, "%s", track->host);
+        if (parent_exists) *parent_exists = 1;
+        if (leaf) *leaf = 1;
+    }
     return host;
 }
 
@@ -706,6 +717,9 @@ static uint32_t create_file(const char *path, uint32_t access, uint32_t disposit
     int write_overlay = write && (oflags & (O_CREAT | O_TRUNC));
     char *host = to_host_ex(path, plain_read || !write_overlay ? RESOLVE_OVERLAY : RESOLVE_WRITE, &parent_ok, &leaf, NULL);
     if (!host) { *error = ERROR_PATH_NOT_FOUND_; return WIN_INVALID_HANDLE; }
+    if ((write || (oflags & (O_CREAT | O_TRUNC))) && workshop_under(host)) {
+        free(host); *error = ERROR_ACCESS_DENIED_; return WIN_INVALID_HANDLE;
+    }
     if (write || (oflags & (O_CREAT | O_TRUNC))) archive_changed(host);
     if (write_overlay) prepare_write_parent(host);
     /* A listed directory answers the loose-file probes without a lookup. */
@@ -1617,6 +1631,29 @@ static void find_gather(find_t *f, const char *dir, const char *pattern, int dot
     free(names);
 }
 
+static void find_workshop(find_t *found, const char *directory, const char *pattern, int flags)
+{
+    if (!workshop_valid || workshop_disabled || strcasecmp(directory, "C:\\Games\\Crashday\\user")) return;
+    for (unsigned i = 0; i < workshop_count; ++i) {
+        const workshop_entry *entry = &workshop_entries[i];
+        if (!entry->track) continue;
+        char name[64];
+        snprintf(name, sizeof name, "workshop-%llu.trk", (unsigned long long)entry->id);
+        if (!find_matches(pattern, name, flags)) continue;
+        int duplicate = 0;
+        for (int j = 0; j < found->count && !duplicate; ++j) duplicate = !strcasecmp(found->found[j].name, name);
+        struct stat st;
+        if (duplicate || stat(entry->host, &st)) continue;
+        found_t *next = realloc(found->found, sizeof *next * (size_t)(found->count + 1));
+        if (!next) continue;
+        found->found = next;
+        char *copy = strdup(name);
+        if (!copy) continue;
+        found->found[found->count].name = copy;
+        found->found[found->count++].st = st;
+    }
+}
+
 static uint32_t find_first(int wide, int extended)
 {
     char *pattern_path = wide ? void_wstr_utf8(ARG(0)) : void_astr_utf8(ARG(0));
@@ -1651,6 +1688,7 @@ static uint32_t find_first(int wide, int extended)
     int dots = strlen(norm) > 3;                  /* not "c:\\" */
     if (extra_dir) find_gather(&gathered, extra_dir, pattern, dots, (int)flags);
     if (dir_ok) find_gather(&gathered, host_dir, pattern, dots, (int)flags);
+    find_workshop(&gathered, norm, pattern, (int)flags);
     free(host_dir); free(extra_dir);
     void_blocking_end();
     void_perf_add(VOID_PERF_FIND, void_perf_now_ns() - start, 0);

@@ -6941,6 +6941,8 @@ L_006060D0:
 L_006060FB:
     edi = MEM32(0x7CC694); /* 0x006060FB: mov edi, dword ptr [0x7cc694] */
 L_00606101:
+    { extern void crashday_workshop_load(uint32_t);
+      RECOMP_REGS_OUT(); crashday_workshop_load(esi); RECOMP_REGS_IN(); }
     _xmm[0].u64[0] = MEM32(esi + 0x14); _xmm[0].u64[1] = 0; /* 0x00606101: movss xmm0, dword ptr [esi + 0x14] */
     _flag_a = SSE_COMI(_xmm[0].f32[0], sse_f32(MEM32(0x808C18))); _flag_b = 0; _cf = _flag_a & 1u; /* 0x00606106: comiss xmm0, dword ptr [0x808c18] */
     _flag_k = FK_EFLAGS;

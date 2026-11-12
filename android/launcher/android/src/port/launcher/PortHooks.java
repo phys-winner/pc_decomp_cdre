@@ -1,7 +1,9 @@
 package port.launcher;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.widget.LinearLayout;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
@@ -10,6 +12,9 @@ import java.util.List;
  *  "app.hooks" implements it (all methods are optional). The launcher's process loads it: it must
  *  not touch the game's activity or native library. */
 public interface PortHooks {
+    /** Game-specific tools shown below the launch card, without loading the game process. */
+    default void addLauncherActions(Activity activity, LinearLayout parent) { }
+
     /** Paths of a part, relative to its folder, which the game also needs and which are missing
      *  there now, beyond port.json's "required": what depends on the game's own settings (UT3: the
      *  language chosen in its settings). Empty when nothing is missing. */

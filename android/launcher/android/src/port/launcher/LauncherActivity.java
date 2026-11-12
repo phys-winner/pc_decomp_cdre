@@ -307,6 +307,7 @@ public final class LauncherActivity extends Activity {
         work.addView(ui.buttons(workStop));
         work.setVisibility(View.GONE);
         distributions = holder(main);
+        hooks.addLauncherActions(this, main);
         files = holder(main);
         renderer = holder(side);
         options = holder(side);

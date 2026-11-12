@@ -26,9 +26,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Locale;
 import org.crashday.port.launcher.Launch;
+import org.crashday.port.launcher.WorkshopStore;
 
 public final class GameActivity extends Activity implements SurfaceHolder.Callback, View.OnTouchListener {
     static { System.loadLibrary("crashday"); }
+    // The native mod snapshot survives Activity recreation.
+    private static boolean workshopPrepared;
     static native void nativeSurface(Surface surface);
     static native int nativeStart(String game, String images, String userdata, android.content.res.AssetManager assets, boolean crashTest, int renderScale);
     static native int nativeStatus();
@@ -759,6 +762,15 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             refuse("Производные текстуры повреждены. Удалите их в лаунчере. " + e.getMessage());
             return;
         }
+        if (!workshopPrepared) {
+            try {
+                WorkshopStore.prepare(this);
+                android.system.Os.setenv("PORT_WORKSHOP_ROOT", WorkshopStore.root(this).getCanonicalPath(), true);
+            } catch (Exception error) {
+                refuse(tr("Could not prepare mods: ", "Не удалось подготовить моды: ") + error.getMessage());
+                return;
+            }
+        }
         launch.starting();
         try {
             nativePlayerName(ProfileStorage.playerName(this).getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -769,6 +781,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         boolean crashTest = getIntent().getBooleanExtra("crashTest", false) && ProfileStorage.profileName(this).startsWith("userdata-");
         int error = nativeStart(game.getAbsolutePath(), images.getAbsolutePath(), userdata.getAbsolutePath(), getAssets(), crashTest, renderScale);
         if (error != 0) { refuse("Ошибка запуска: " + error); return; }
+        workshopPrepared = true;
         started = true;
         status.setText("Загрузка Crashday…");
         handler.post(progress);

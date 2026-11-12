@@ -5,7 +5,7 @@ static recompilation of the original 32-bit Windows program and its runtime
 dependencies. The translated code runs natively on ARM64; the port supplies the
 Windows interfaces, Direct3D 9 renderer, audio, storage and Android integration.
 
-**Port version: `0.1.1-dev` · Android package: `org.crashday.port` · version code: `4`.**
+**Port version: `0.2-dev` · Android package: `org.crashday.port` · version code: `5`.**
 
 Project: [phys-winner/pc_decomp_cdre](https://github.com/phys-winner/pc_decomp_cdre).
 APK releases belong on the project's
@@ -45,8 +45,8 @@ not needed on the phone.
 - Space for the APK, approximately 531 MiB of original game files, saves and
   additional texture-conversion output. Conversion needs temporary free space.
 
-1. Install the APK. This build uses version code `4` and can update the first
-   public build (code `1`) and earlier local builds (codes `2` or `3`).
+1. Install the APK. This build uses version code `5` and can update public `0.1-dev`
+   (code `1`), `0.1.1-dev` (code `4`) and earlier local builds (codes `2` or `3`).
    Updates must retain the signing certificate to preserve the installed app's data.
 2. Open Crashday. If game files are missing, press **Import from a ZIP…** on the
    main game card, select the archive, review the destination and free space,
@@ -111,6 +111,42 @@ Graphics settings expose the display refresh rates and MSAA sample counts
 supported by the device. Refresh rate and FPS limit are independent. Lowering the
 3D scale preserves the full-resolution race HUD. Controls are released when the
 app loses focus; returning through the launcher resumes a running game process.
+
+## Steam Workshop mods
+
+Open **Steam Workshop** in the launcher to browse Crashday's public catalogue.
+Search by name, select a category, change sorting or paste a Workshop item URL/ID.
+Cards include previews, tags, size and a details view with the description and
+Steam page. The API badge checks Steam's metadata service separately from the
+catalogue; tap it to check again.
+
+**Downloads** shows the persistent queue, progress, cancellation, errors and retry.
+Downloads continue through the launcher's foreground work service. Reopening the
+Workshop resumes queued work after an interrupted process. Files are streamed,
+checked against their expected sizes and validated before installation; a failed
+update preserves the installed version.
+
+**Installed** controls enabled mods and their order, with enable/disable-all,
+per-item removal, **Disable Workshop mods** and **Mod development mode**. The latter
+retains the original game's loading of local development mods. Mods load from top
+to bottom through the original content loader. Changes take effect at the next
+complete game start; returning to an already running game keeps its current mods.
+Old files needed by that game remain until the next fresh start.
+
+The native interface adapts to phones and tablets in both orientations. The tablet
+catalogue uses two or three columns, larger previews, wider details and separate
+columns for installed mods and downloads when space permits.
+
+Public CPK mods and TRK tracks with Steam-provided download URLs are supported,
+up to 2 GiB per file. This does not sign in to Steam or synchronize an account's
+subscriptions. Collections and content that requires Steam depot authentication
+are not downloaded. The catalogue uses Valve's structured page data and can need
+an update if Valve changes that format.
+
+Downloaded mods are held in the app's private storage, separately from the original
+game files and player profiles. APK updates preserve them; uninstalling the app
+removes them. Base game archives are not replaced. Compatibility, dependencies and
+conflicts remain specific to each mod.
 
 ## Saves and diagnostics
 
@@ -229,25 +265,34 @@ oracles require the pinned game/DLL inputs. The separate CPK compatibility tool
 requires converted game archives and a derived executable; see its `--help` for
 fixture paths. None of these host checks proves a complete game playthrough.
 
+To exercise Workshop parsing and persistence with Android's real JSON and storage
+APIs on a selected connected device:
+
+```powershell
+python -X utf8 -B tools/test_workshop_backend.py --android-serial DEVICE_SERIAL
+```
+
+The check uses a temporary directory and does not install an APK or change player
+profiles.
+
 ## Local release files
 
 `pub/` is ignored by Git. Local release APKs follow the Heroes V convention:
-`crashday-0.1-dev-<first-eight-SHA256-characters>.apk`, accompanied by a `.sha256`
+`crashday-0.2-dev-<first-eight-SHA256-characters>.apk`, accompanied by a `.sha256`
 file containing the full checksum and APK basename. For example, after packaging:
 
 ```powershell
 New-Item -ItemType Directory -Force pub
 $apkSource = "build/apk/Crashday.apk"
 $apkHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkSource).Hash.ToLowerInvariant()
-$releaseName = "crashday-0.1-dev-$($apkHash.Substring(0, 8)).apk"
+$releaseName = "crashday-0.2-dev-$($apkHash.Substring(0, 8)).apk"
 Copy-Item -LiteralPath $apkSource -Destination (Join-Path pub $releaseName)
 "$apkHash  $releaseName" | Set-Content -Encoding ascii -LiteralPath (Join-Path pub ($releaseName -replace '\.apk$', '.sha256'))
 ```
 
-The version is stored in `android/app/AndroidManifest.xml`. The ZIP-import build
-uses the requested public numbering `0.1-dev` / code `1`. Earlier local APKs used
-codes `2` and `3`; Android treats this build as a downgrade from those versions
-and blocks a normal update over them. Increase `versionCode` for each later
+The version is stored in `android/app/AndroidManifest.xml`. This build uses
+`0.2-dev` / code `5`, above public `0.1-dev` / code `1`, `0.1.1-dev` / code `4`
+and earlier local codes `2` and `3`. Increase `versionCode` for each later
 release and retain the same APK signing key.
 Preparing these local files does not publish a GitHub release or create a tag.
 
@@ -268,7 +313,7 @@ It runs on release changes, every six hours and through manual workflow dispatch
 The version, package, ABI, minimum SDK, certificate and SHA-256 come from the APK.
 Publish player-facing releases without GitHub's pre-release flag so the permanent
 `releases/latest` link works, even while the version name contains `-dev`.
-For future updates, increase `versionCode` above `1` and retain the signing key.
+For future updates, increase `versionCode` above `5` and retain the signing key.
 
 ## Status and known limitations
 
@@ -281,8 +326,9 @@ device or every game mode.
 
 - A full career, every track/car/material and long endurance sessions have not
   been exhaustively tested.
-- Steam online matchmaking, Workshop integration and voice capture are
-  unavailable. The port has a local Steam interface and LAN networking code;
+- Steam online matchmaking, account Workshop subscription synchronization and voice
+  capture are unavailable. Public Workshop CPK/TRK downloads use the launcher.
+  The port has a local Steam interface and LAN networking code;
   complete multiplayer interoperability is not established by host tests.
 - Physical controllers, Bluetooth input, accessibility with TalkBack and
   subjective audio quality have not received comprehensive acceptance testing.
