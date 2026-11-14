@@ -31,6 +31,50 @@ static void init_window_ack(void)
 }
 static int display_width, display_height, game_started, game_result = INT_MIN, frame_ready, launcher_ready;
 static float selected_fps = 60;
+static int aspect_correction = 1, instant_steering, digital_steering;
+
+double crashday_world_aspect_numerator(void)
+{
+    return __atomic_load_n(&aspect_correction, __ATOMIC_ACQUIRE) ? .75 : .85;
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeAspectCorrection(JNIEnv *env, jclass type, jboolean value)
+{
+    (void)env; (void)type;
+    __atomic_store_n(&aspect_correction, value != 0, __ATOMIC_RELEASE);
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeInstantSteering(JNIEnv *env, jclass type, jboolean value)
+{
+    (void)env; (void)type;
+    __atomic_store_n(&instant_steering, value != 0, __ATOMIC_RELEASE);
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeSteeringDigital(JNIEnv *env, jclass type, jboolean value)
+{
+    (void)env; (void)type;
+    __atomic_store_n(&digital_steering, value != 0, __ATOMIC_RELEASE);
+}
+
+JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeRumble(JNIEnv *env, jclass type, jboolean clear)
+{
+    (void)env; (void)type;
+    extern uint32_t void_input_rumble(int);
+    return (jint)void_input_rumble(clear);
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeUpscaler(JNIEnv *env, jclass type, jint value)
+{
+    (void)env; (void)type;
+    if (!game_started && value >= 0 && value <= 2) setenv("CRASHDAY_UPSCALER", value == 2 ? "fsr3" : value == 1 ? "fsr1" : "off", 1);
+}
+
+JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeUpscalerStatus(JNIEnv *env, jclass type)
+{
+    (void)env; (void)type;
+    extern int d3d_gl_upscaler_status(void);
+    return d3d_gl_upscaler_status();
+}
 static float selected_refresh = 60;
 static uint32_t display_rates[32] = {60}, display_rate_count = 1;
 static uint32_t refresh_request;
@@ -368,7 +412,7 @@ JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeStart(JNIEnv *e
     jstring game, jstring images, jstring data, jobject assets, jboolean crash_test, jint render_scale)
 {
     (void)type;
-    if (render_scale < 25 || render_scale > 100) return EINVAL;
+    if (render_scale < 25 || render_scale > 200) return EINVAL;
     extern void void_android_asset_init(JNIEnv *, jobject);
     void_android_asset_init(env, assets);
     if (game_started) return 0;
@@ -551,6 +595,19 @@ static uint32_t crashday_race_car(void)
     uint32_t end = players && void_vm_readable(players, 8) ? MEM32(players + 4) : 0;
     uint32_t player = first && end > first && void_vm_readable(first, 4) ? MEM32(first) : 0;
     return player && void_vm_readable(player + 0xCAB0, 4) ? MEM32(player + 0xCAB0) : 0;
+}
+
+uint32_t crashday_steering_bits(uint32_t car, uint32_t previous)
+{
+    if (!__atomic_load_n(&instant_steering, __ATOMIC_ACQUIRE) ||
+        !__atomic_load_n(&digital_steering, __ATOMIC_ACQUIRE) || car != crashday_race_car() ||
+        !void_vm_writable(car + 0x6CB0, 4) || !void_vm_writable(car + 0x6E18, 4) ||
+        !void_vm_readable(car + 0x7177, 2) || !void_vm_readable(car + 0x6858, 4)) return previous;
+    float angle = MEMF(car + 0x6858);
+    if (!isfinite(angle) || angle < 0 || angle > 180) return previous;
+    float target = angle * ((MEM8(car + 0x7178) != 0) - (MEM8(car + 0x7177) != 0));
+    MEMF(car + 0x6CB0) = MEMF(car + 0x6E18) = target;
+    return MEM32(car + 0x6CB0);
 }
 
 static int crashday_race_weapons(void)
@@ -748,6 +805,9 @@ static int crashday_ui_scene(uint32_t *out)
         if (crashday_widget_name(widget, "btnRestoreQuickChatDefaults")) return 12;
         if (crashday_widget_name(widget, "btnSingleplayerQuickRace")) return 0;
         if (crashday_widget_name(widget, "btnQuitOptions")) return 5;
+        if (crashday_widget_name(widget, "btnNextCar")) return 4;
+        if (crashday_widget_name(widget, "btnQuitCredits")) return 21;
+        if (crashday_widget_name(widget, "btnQuitAdvControllerOptions")) return 22;
     }
     return 8;
 }
@@ -770,6 +830,21 @@ JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeReplayState(JNI
     if (!game_started) return 0;
     void_machine_enter();
     int state = crashday_replay_state();
+    uint32_t hud = menu_debug ? crashday_replay_hud() : 0;
+    if (hud) {
+        static int last_state = -1, last_camera = -1, last_speed = -1, last_car = -1;
+        static uint64_t next_log;
+        int camera = MEM16(hud + 0x168), speed = MEM16(hud + 0x1B0), car = MEM16(hud + 0x1F8);
+        uint32_t session = MEM32(0x8692E8u), replay = MEM32(0x87C7A4u);
+        uint64_t now = void_perf_now_ns();
+        if ((state != last_state || camera != last_camera || speed != last_speed || car != last_car || now >= next_log) &&
+            void_vm_readable(session + 0xB4, 4) && void_vm_readable(replay + 0x4038, 1)) {
+            void_log("[replay] state=%08X camera=%d speed=%d car=%d seconds=%.3f ended=%u mono_ns=%llu",
+                (unsigned)state, camera, speed, car, MEMF(session + 0xB4), MEM8(replay + 0x4038), (unsigned long long)now);
+            last_state = state; last_camera = camera; last_speed = speed; last_car = car;
+            next_log = now + 500000000ull;
+        }
+    }
     void_machine_leave();
     return state;
 }
@@ -841,7 +916,7 @@ static void crashday_ui_snap_pointer(float *x, float *y)
     if (!widgets || !renderer || !void_vm_readable(renderer + 0xE4, 4)) return;
     float width = 640 * MEMF(renderer + 0xE4);
     if (!isfinite(width) || width < 640) return;
-    float px = *x * width, py = *y * 480, best = 201, tx = px, ty = py;
+    float px = *x * width, py = *y * 480, best = INFINITY, tx = px, ty = py;
     uint32_t view = crashday_editor_view();
     if (view && px >= MEMF(view) && px < MEMF(view + 8) && py >= MEMF(view + 4) && py < MEMF(view + 12)) return;
     uint32_t result_continue = 0;
@@ -852,18 +927,25 @@ static void crashday_ui_snap_pointer(float *x, float *y)
         if (!name || (strncmp(name, "btn", 3) && strncmp(name, "chk", 3) && strncmp(name, "swt", 3)) ||
             !void_vm_readable(w, 0x88) || !MEM8(w + 0x74) || !MEM8(w + 0x75)) continue;
         float left = MEMF(w + 0x78), top = MEMF(w + 0x7C), rw = MEMF(w + 0x80), rh = MEMF(w + 0x84);
+        int car_button = !strcmp(name, "btnLastCar") || !strcmp(name, "btnNextCar");
+        if (car_button && isfinite(left) && isfinite(rw)) {
+            float right = fminf(width, left + rw);
+            left = fmaxf(0, left); rw = right - left;
+        }
         if (!isfinite(left) || !isfinite(top) || !isfinite(rw) || !isfinite(rh) || rw < 2 || rh < 2 ||
             left < 0 || top < 0 || left + rw > width || top + rh > 480) continue;
         if (!strcmp(name, "btnContinueFromHighscore") || !strcmp(name, "btnContinueFromStats")) result_continue = w;
         float cx = fmaxf(left, fminf(left + rw, px)), cy = fmaxf(top, fminf(top + rh, py));
         float dx = cx - px, dy = cy - py, distance = dx * dx + dy * dy;
-        if (fabsf(dx) <= 10 && fabsf(dy) <= 10 && distance < best) {
+        float margin = car_button ? 48 : 10;
+        if (fabsf(dx) <= margin && fabsf(dy) <= margin && distance < best) {
             best = distance;
-            tx = fmaxf(left + 1, fminf(left + rw - 1, px));
-            ty = fmaxf(top + 1, fminf(top + rh - 1, py));
+            /* Center car arrows so conversion to the guest's coarser cursor cannot round outside. */
+            tx = car_button ? left + rw * .5f : fmaxf(left + 1, fminf(left + rw - 1, px));
+            ty = car_button ? top + rh * .5f : fmaxf(top + 1, fminf(top + rh - 1, py));
         }
     }
-    if (best == 201 && result_continue) {
+    if (!isfinite(best) && result_continue) {
         tx = MEMF(result_continue + 0x78) + MEMF(result_continue + 0x80) * .5f;
         ty = MEMF(result_continue + 0x7C) + MEMF(result_continue + 0x84) * .5f;
     }
@@ -880,6 +962,9 @@ JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeMenuControl(JNI
     uint32_t widgets = crashday_ui_container(), ui = MEM32(0x869418u), renderer = MEM32(0x870260u);
     int kind = 0;
     if (widgets && renderer && void_vm_readable(renderer + 0xE4, 4)) {
+        if (crashday_ui_scene(NULL) == 4) {
+            gesture_container = widgets; gesture_callback = MEM32(ui);
+        }
         float px = x * 640 * MEMF(renderer + 0xE4), py = y * 480;
         if (menu_debug) void_log("[ui] touch %.1f %.1f scene=%d cursor=%u,%u mode=%08X warp=%u focus=%08X/%08X page=%08X/%08X",
             px, py, crashday_ui_scene(NULL), MEM32(MEM32(0x870268u)+0x18), MEM32(MEM32(0x870268u)+0x1C),
@@ -915,13 +1000,23 @@ JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeMenuOption(
     if (!game_started || (direction != -1 && direction != 1)) return JNI_FALSE;
     void_machine_enter();
     uint32_t w = gesture_widget, ui = MEM32(0x869418u), widgets = crashday_ui_container(), renderer = MEM32(0x870260u);
+    int car = !gesture_widget && crashday_ui_scene(NULL) == 4;
+    if (car && widgets) {
+        w = 0;
+        unsigned count = (uint16_t)MEM16(widgets + 0x30);
+        for (unsigned i = 0; i < count; ++i) {
+            uint32_t candidate = MEM32(MEM32(widgets + 0x34) + i * 4);
+            if (crashday_widget_name(candidate, direction > 0 ? "btnNextCar" : "btnLastCar")) { w = candidate; break; }
+        }
+    }
     const char *name = crashday_widget_text(w);
-    int ok = widgets && widgets == gesture_container && ui && MEM32(ui) == gesture_callback && name && !strncmp(name, "swt", 3) &&
+    int ok = widgets && widgets == gesture_container && ui && MEM32(ui) == gesture_callback && name &&
+        (car || !strncmp(name, "swt", 3)) &&
         void_vm_readable(w, 0x88) && MEM8(w + 0x74) && MEM8(w + 0x75) && renderer && void_vm_readable(renderer + 0xE4, 4);
     if (ok) {
         int width, height; void_input_screen_size(&width, &height);
         float aspect = MEMF(renderer + 0xE4);
-        float x = MEMF(w + 0x78) + MEMF(w + 0x80) * (direction > 0 ? .94f : .06f);
+        float x = MEMF(w + 0x78) + MEMF(w + 0x80) * (car ? .5f : direction > 0 ? .94f : .06f);
         float y = MEMF(w + 0x7C) + MEMF(w + 0x84) * .5f;
         ok = isfinite(x) && isfinite(y) && isfinite(aspect) && aspect >= 1;
         if (ok) {
@@ -942,9 +1037,36 @@ static struct {
 } menu_layout;
 
 static _Thread_local float menu_draw_scale = 1;
+static _Thread_local uint32_t menu_draw_widget;
+static pthread_mutex_t settings_caption_lock = PTHREAD_MUTEX_INITIALIZER;
+static char settings_caption[512] = "ADDITIONAL SETTINGS";
+
+static float settings_entry_y(uint32_t widget)
+{
+    float top = MEMF(widget + 0x7C), height = MEMF(widget + 0x84);
+    if (!isfinite(top) || !isfinite(height) || height <= 0) return NAN;
+    float y = fminf(top + height * 1.3f, 420 - height);
+    return y >= top + height ? y : NAN;
+}
+
+JNIEXPORT void JNICALL Java_org_crashday_port_GameActivity_nativeSettingsCaption(JNIEnv *env, jclass type, jstring text)
+{
+    (void)type;
+    if (!text) return;
+    const char *value = (*env)->GetStringUTFChars(env, text, NULL);
+    if (!value) return;
+    size_t size = strlen(value);
+    if (size && size < sizeof settings_caption) {
+        pthread_mutex_lock(&settings_caption_lock);
+        memcpy(settings_caption, value, size + 1);
+        pthread_mutex_unlock(&settings_caption_lock);
+    }
+    (*env)->ReleaseStringUTFChars(env, text, value);
+}
 
 void crashday_ui_draw_begin(uint32_t widget)
 {
+    menu_draw_widget = widget;
     menu_draw_scale = 1;
     for (unsigned i = 0; i < menu_layout.count; ++i) {
         const float *b = menu_layout.rows[i].bounds;
@@ -955,7 +1077,53 @@ void crashday_ui_draw_begin(uint32_t widget)
     }
 }
 
-void crashday_ui_draw_end(void) { menu_draw_scale = 1; }
+void crashday_ui_draw_end(void)
+{
+    uint32_t w = menu_draw_widget;
+    menu_draw_widget = 0;
+    if (crashday_widget_name(w, "btnCredits") && crashday_ui_scene(NULL) == 5 &&
+        void_vm_writable(w, 0x198) && void_vm_readable(MEM32(w), 16)) {
+        float y = settings_entry_y(w);
+        float h = MEMF(w + 0x84);
+        uint32_t draw = MEM32(MEM32(w) + 12);
+        if (isfinite(y) && isfinite(h) && y >= 100 && h > 0 && y + h <= 420 && void_dispatch_find(draw)) {
+            static uint32_t caption;
+            if (!caption) caption = void_galloc(sizeof settings_caption);
+            if (caption) {
+                uint8_t saved_caption[24], visible = MEM8(w + 0x75);
+                float bounds[4], text_bounds[4];
+                memcpy(saved_caption, GPTR(w + 0x180), 24);
+                memcpy(bounds, GPTR(w + 0x78), 16);
+                memcpy(text_bounds, GPTR(w + 0xA8), 16);
+                pthread_mutex_lock(&settings_caption_lock);
+                size_t size = strlen(settings_caption);
+                memcpy(GPTR(caption), settings_caption, size + 1);
+                pthread_mutex_unlock(&settings_caption_lock);
+                memset(GPTR(w + 0x180), 0, 24);
+                MEM32(w + 0x180) = caption; MEM32(w + 0x190) = (uint32_t)size;
+                MEM32(w + 0x194) = sizeof settings_caption - 1;
+                MEMF(w + 0x7C) = y; MEMF(w + 0xAC) = text_bounds[1] + y - bounds[1];
+                MEM8(w + 0x75) = 1;
+                /* Use the original widget/font, then restore its caption and all guest registers. */
+                void_regs regs; void_regs_save(&regs);
+#ifdef RECOMP_X87_WINDOW
+                double fp[RECOMP_X87_SLOTS]; int64_t integers[RECOMP_X87_SLOTS]; int sp = g_fp_sp;
+                memcpy(fp, g_st_win, sizeof fp); memcpy(integers, g_st_i64_win, sizeof integers);
+#endif
+                uint32_t args[3] = {0, 0, 0};
+                void_call_guest_this(draw, w, 3, args);
+#ifdef RECOMP_X87_WINDOW
+                g_fp_sp = sp; memcpy(g_st_win, fp, sizeof fp); memcpy(g_st_i64_win, integers, sizeof integers);
+#endif
+                void_regs_load(&regs);
+                memcpy(GPTR(w + 0x180), saved_caption, 24);
+                memcpy(GPTR(w + 0x78), bounds, 16); memcpy(GPTR(w + 0xA8), text_bounds, 16);
+                MEM8(w + 0x75) = visible;
+            }
+        }
+    }
+    menu_draw_scale = 1;
+}
 
 float crashday_ui_text_begin(unsigned kind)
 {
@@ -1001,6 +1169,14 @@ void crashday_ui_prepare(void)
             memcpy(menu_layout.rows[i].bounds, GPTR(w + 0x78), 16);
             memcpy(menu_layout.rows[i].caption, GPTR(w + 0xA8), 16);
             menu_layout.rows[i].visible = MEM8(w + 0x75);
+            const char *name = crashday_widget_text(w);
+            if (scene == 22 && name && (!strncmp(name, "sld", 3) || !strncmp(name, "swt", 3))) {
+                /* The XInput page parks its original axis controls 600 units offscreen. */
+                float shift = menu_layout.rows[i].bounds[1] >= 600 ? -540 : 60;
+                menu_layout.rows[i].bounds[1] += shift;
+                menu_layout.rows[i].caption[1] += shift;
+                menu_layout.rows[i].visible = MEM8(w + 0x74) != 0;
+            }
         }
     }
     uint32_t renderer = MEM32(0x870260u);
@@ -1020,6 +1196,7 @@ void crashday_ui_prepare(void)
             menu_layout.bottom = fminf(menu_layout.bottom, b[1] + b[3] - inset - 10);
         }
     }
+    if (scene == 22) menu_layout.top = fmaxf(menu_layout.top, 182);
     for (unsigned i = 0; i < count; ++i) {
         const float *b = menu_layout.rows[i].bounds;
         if (menu_layout.rows[i].visible && b[1] >= 100 && b[3] > 0 && b[3] <= 45)
@@ -1081,8 +1258,8 @@ JNIEXPORT jfloatArray JNICALL Java_org_crashday_port_GameActivity_nativeSettings
         for (unsigned i = 0; i < count; ++i) {
             uint32_t w = MEM32(MEM32(widgets + 0x34) + i * 4);
             if (!crashday_widget_name(w, "btnCredits") || !void_vm_readable(w, 0x88) || !isfinite(width) || width < 640) continue;
-            bounds[0] = (MEMF(w + 0x78) + MEMF(w + 0x84) * .35f) / width;
-            bounds[1] = (MEMF(w + 0x7C) + MEMF(w + 0x84) * 1.3f) / 480;
+            bounds[0] = MEMF(w + 0x78) / width;
+            bounds[1] = settings_entry_y(w) / 480;
             bounds[2] = fmaxf(.56f, MEMF(w + 0x80) / width);
             bounds[3] = MEMF(w + 0x84) / 480;
             break;
@@ -1153,7 +1330,7 @@ JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeUiScene(JNIEnv 
 {
     (void)env;
     (void)type;
-    if (!game_started) return -1;
+    if (!game_started || !__atomic_load_n(&frame_ready, __ATOMIC_ACQUIRE)) return -1;
     void_machine_enter();
     int scene = crashday_ui_scene(NULL);
     static int previous_scene = -99;
@@ -1224,7 +1401,7 @@ JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeTextEditorW
 {
     (void)env;
     (void)type;
-    if (!game_started) return JNI_FALSE;
+    if (!game_started || !__atomic_load_n(&frame_ready, __ATOMIC_ACQUIRE)) return JNI_FALSE;
     void_machine_enter();
     uint32_t widgets = 0;
     crashday_ui_scene(&widgets);
@@ -1319,9 +1496,9 @@ JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeProfileHit(
     void_machine_enter();
     uint32_t renderer = MEM32(0x870260u);
     float width = renderer && void_vm_readable(renderer + 0xE4, 4) ? 640 * MEMF(renderer + 0xE4) : 0;
-    /* MainMenu.cpp draws the 19x18 avatar border at (viewport width - 28, 24). */
+    /* Include the name next to MainMenu.cpp's small avatar, with touch padding. */
     int hit = crashday_ui_scene(NULL) == 0 && isfinite(width) && width >= 640 &&
-        x * width >= width - 36 && x * width <= width - 4 && y * 480 >= 18 && y * 480 <= 50;
+        x * width >= width - 200 && x * width <= width - 4 && y * 480 >= 12 && y * 480 <= 60;
     void_machine_leave();
     return hit ? JNI_TRUE : JNI_FALSE;
 }
@@ -1452,6 +1629,8 @@ JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativePointer(JNI
     return JNI_TRUE;
 }
 #else
+double crashday_world_aspect_numerator(void) { return .85; }
+uint32_t crashday_steering_bits(uint32_t car, uint32_t previous) { (void)car; return previous; }
 __attribute__((weak)) void void_android_request_refresh(uint32_t rate) { (void)rate; }
 __attribute__((weak)) float crashday_hud_y(float y, float offset) { (void)offset; return y; }
 __attribute__((weak)) float crashday_weapon_coord(unsigned weapon, unsigned axis, float value, float origin)

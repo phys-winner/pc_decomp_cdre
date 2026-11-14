@@ -23,7 +23,9 @@ import tempfile
 import zipfile
 import zlib
 import test_group_ui
+import test_recents
 import test_play_button
+import test_touch_refresh
 import test_diagnostics
 import test_update_manifest
 
@@ -231,8 +233,10 @@ def main():
         fixtures(folder)
         ok = java_checks(folder)
         ok &= test_group_ui.check(ROOT, folder)
+        ok &= test_recents.check(ROOT, folder)
         ok &= test_diagnostics.check(ROOT, folder)
         ok &= test_play_button.check(ROOT, folder)
+        ok &= test_touch_refresh.check(ROOT, folder)
         ok &= test_update_manifest.check(ROOT, folder)
         ok &= native_checks(folder)
         ok &= tool_checks(folder)

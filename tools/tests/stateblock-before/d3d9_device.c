@@ -1555,6 +1555,7 @@ void d3d_stateblock_apply(d3d_stateblock *sb)
         apply_recorded(d, d->st.vs_b, s->vs_b, sb->rec_vs_b, 16, 4) |
         apply_recorded(d, d->st.ps_b, s->ps_b, sb->rec_ps_b, 16, 4);
     apply_recorded(d, d->st.transforms, s->transforms, sb->rec_transform, 512, 64);
+    if (sb->rec_transform[256]) { d->st.world_identity = s->world_identity; DIRTY(d, d->st.world_identity); }
     if (sb->rec_viewport) {
         memcpy(d->st.viewport, s->viewport, 16); memcpy(d->st.viewport_z, s->viewport_z, 8);
         DIRTY(d, d->st.viewport); DIRTY(d, d->st.viewport_z);

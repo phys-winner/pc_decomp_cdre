@@ -36,6 +36,7 @@ static GLuint vao, upload_unit;
 static int raster_state_valid, window_mode, egl_swap_interval=1, dump_every;
 static _Atomic int surface_live;
 static struct { uint32_t max_texture, max_3d_texture, max_draw_buffers; int astc_ldr; } d3d_gl_limits;
+static void gpu_profile_init(const char *extensions) { (void)extensions; }
 static float max_anisotropy=1;
 static int has_window, failure, initializations, contexts, surfaces, destroyed_surfaces, destroyed_contexts, terminated;
 static int window_refs, window_acquired, window_released, acquire_calls;

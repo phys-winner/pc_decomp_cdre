@@ -1,0 +1,22 @@
+{
+  "generator": "tools/fsr3_shaders.py",
+  "sdk_commit": "c6efa6bf7f2027b3ec94f28578bb5965eabb9e55",
+  "spirv_cross_commit": "57e4efcc84112abcd426dc5ec248b5339bee04f2",
+  "files": {
+    "fsr3-bindings.json": "1e2f6bebb3f6d24de9eeb7abb2d253615c7d3fe63771b27262e46eabd192cc7b",
+    "ffx_fsr3upscaler_accumulate_pass.glsl": "9ff81e3652129d50671219c70f2e2cbd591e04af46ff23f319fdc06226da81c9",
+    "ffx_fsr3upscaler_accumulate_pass_sharp.glsl": "c654e46b9f68dc4ac186ee8fb5a650727ec390e981e882e540a4ee953c303bf6",
+    "ffx_fsr3upscaler_autogen_reactive_pass.glsl": "4fa4f38fe859cadb01483d28bab28585656bfd504b1148f52010fdb9b4b81727",
+    "ffx_fsr3upscaler_debug_view_pass.glsl": "24646e869b9fa2fd4ca413292c52a71d3568b8705a07a814928925647b62d2b5",
+    "ffx_fsr3upscaler_luma_instability_pass.glsl": "db78cbad03fadea53f823f2f115d42deb7593e1fe6fe3459fc18456ef396e5e7",
+    "ffx_fsr3upscaler_luma_pyramid_pass.glsl": "c0dd4634089ceb4027d2e355398eec7399078a1b93fd8f4f56cdecec2a17e10b",
+    "ffx_fsr3upscaler_prepare_inputs_pass.glsl": "d39ab58233ad31954da32dca42e336954faeaa0ec7d42efccd7798abdc4d1563",
+    "ffx_fsr3upscaler_prepare_reactivity_pass.glsl": "d51c1e0f91a9f176a279f3feb193f08beb8df1cfde06ac3fdb43e1b51d2cf617",
+    "ffx_fsr3upscaler_rcas_pass.glsl": "6d4307d7a839e9989640f0b8d30cd001eb425dfadf881073c7ab10c47ff68cce",
+    "ffx_fsr3upscaler_shading_change_pass.glsl": "27bb8a66dd0d035e74cd8efa185a7de80fafa08b42b7d4984529f09a1d6c12a0",
+    "ffx_fsr3upscaler_shading_change_pyramid_pass.glsl": "03ba0837424828a514de63de1e3f67225c67c05fbc80bc4d45decef3c9a1eb2c"
+  },
+  "upscale_kernel": "SDK default polynomial Lanczos (2); SDK Lanczos lookup table for history (1)",
+  "compiler_optimization": "shaderc -O -g; preserve binding names for SDK reflection",
+  "filtering": "SDK FP16 intermediates in RGBA16F; explicit bilinear fetch for R32F samplers without optional float-linear support"
+}

@@ -169,6 +169,8 @@ public final class WorkshopBackendSelfcheck {
         check(store.disabled(),"failed flag save rolls memory back");
         reject(()->store.remove("6"),"failed remove save");
         check(store.entries().size()==3&&p2.isFile(),"failed removal keeps entry and payload");
+        reject(store::removeAllInstalled,"failed bulk removal save");
+        check(store.entries().size()==3&&p1.isFile()&&p2.isFile(),"failed bulk removal preserves records and payloads");
         check(blocker.delete(),"manifest blocker removed");
         File stateBlocker=new File(State.folder(context),"workshop.tmp");check(stateBlocker.mkdir(),"state failure injected");
         reject(()->store.setDisabled(false),"state write failure");
@@ -200,6 +202,10 @@ public final class WorkshopBackendSelfcheck {
         check(Work.starts==1,"queue starts after other work ends without an Activity poll");
         again.kick();Thread.sleep(1200);
         check(Work.starts==1,"deferred wake creates only one worker");
+        again.removeAllInstalled();
+        check(again.entries().size()==1&&again.entries().get(0).item.id.equals("7"),"bulk delete only removes downloaded mods, including updating mods");
+        check(p1.isFile()&&!read(manifest).contains("5\t"),"bulk delete retires active payload until restart");
+        WorkshopStore.prepare(context);check(!p1.exists(),"bulk retired payload reclaimed on fresh start");
     }
     public static void main(String[]args)throws Exception{
         File root=new File(args[1]);core(root);if(args[0].equals("android"))android(root);

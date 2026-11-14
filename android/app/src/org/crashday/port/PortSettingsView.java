@@ -8,26 +8,31 @@ import android.view.MotionEvent;
 import android.view.View;
 
 final class PortSettingsView extends View {
+    private static final int ROWS = 16;
     private final GameActivity activity;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private boolean entry, entrySelected, full, help, swiping;
+    private boolean entry, entrySelected, controllerPage, full, help, swiping;
     private int selected, pointer = -1, safeLeft, safeTop, safeRight, safeBottom;
     private float downX, downY, lastY, scroll, lastOptionX, optionRemainder;
     private int gestureAxis, gestureRow;
     private float[] entryBounds = {.04f, .61f, .56f, .055f};
+    private String entryCaption = "";
 
     PortSettingsView(GameActivity activity) { super(activity); this.activity = activity; setVisibility(GONE); }
     void setSafeInsets(int left, int top, int right, int bottom) {
         safeLeft = left; safeTop = top; safeRight = right; safeBottom = bottom; cancelGesture(); invalidate();
     }
     void cancelGesture() { pointer = -1; swiping = false; gestureAxis = 0; }
+    void setControllerPage(boolean value) { controllerPage = value; }
     void setEntry(boolean visible, boolean selected) {
         entry = visible; entrySelected = selected;
         if (entry && !full) {
+            String caption = activity.tr("ADDITIONAL SETTINGS", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ");
+            if (!caption.equals(entryCaption)) { GameActivity.nativeSettingsCaption(caption); entryCaption = caption; }
             float[] bounds = GameActivity.nativeSettingsEntry();
             if (bounds != null && bounds.length == 4) entryBounds = bounds;
         }
-        if (!full) setVisibility(entry ? VISIBLE : GONE);
+        if (!full) setVisibility(entry || controllerPage ? VISIBLE : GONE);
         invalidate();
     }
     void open() { full = true; help = false; selected = 0; scroll = 0; cancelGesture(); setVisibility(VISIBLE); invalidate(); }
@@ -39,14 +44,14 @@ final class PortSettingsView extends View {
     private float top() { return getHeight() * .23f; }
     private float bottom() { return getHeight() * .85f; }
     private void scrollRows(float distance) {
-        scroll = Math.max(0, Math.min(Math.max(0, 11 * rowHeight() - (bottom() - top())), scroll + distance)); invalidate();
+        scroll = Math.max(0, Math.min(Math.max(0, ROWS * rowHeight() - (bottom() - top())), scroll + distance)); invalidate();
     }
     private int rowAt(float x, float y) {
         if (x < getWidth() * .03f || x > getWidth() * .97f || y < top() || y >= bottom()) return -1;
-        int row = (int) ((y - top() + scroll) / rowHeight()); return row < 11 ? row : -1;
+        int row = (int) ((y - top() + scroll) / rowHeight()); return row < ROWS ? row : -1;
     }
     private void select(int row) {
-        selected = Math.max(0, Math.min(10, row));
+        selected = Math.max(0, Math.min(ROWS - 1, row));
         if (selected * rowHeight() < scroll) scroll = selected * rowHeight();
         if ((selected + 1) * rowHeight() > scroll + bottom() - top()) scroll = (selected + 1) * rowHeight() - bottom() + top();
         scrollRows(0);
@@ -54,13 +59,18 @@ final class PortSettingsView extends View {
     private void change(int direction) {
         switch (selected) {
             case 0: activity.changeSteeringMode(direction); break;
-            case 1: activity.changeControlLayout(direction); break;
+            case 1: activity.toggleMinigunCruise(); break;
             case 2: activity.changeSensitivity(direction); break;
-            case 5: activity.cycleFps(direction); break;
+            case 5: activity.toggleInstantSteering(); break;
             case 6: activity.toggleDriving(); break;
             case 7: activity.changeUiScale(direction); select(selected); break;
             case 8: activity.changeRenderScale(direction); break;
-            case 9: activity.changeLanguage(direction); break;
+            case 9: activity.changeUpscaler(direction); break;
+            case 10: activity.toggleAspectCorrection(); break;
+            case 11: activity.changeLanguage(direction); break;
+            case 13: activity.changeTurnSensitivity(direction); break;
+            case 14: activity.toggleControllerVibration(); break;
+            case 15: activity.toggleDeviceVibration(); break;
             default: break;
         }
         invalidate();
@@ -69,7 +79,7 @@ final class PortSettingsView extends View {
         switch (selected) {
             case 3: activity.calibrateTilt(); break;
             case 4: activity.openTouchEditor(); break;
-            case 10: activity.openGestureHelp(); break;
+            case 12: activity.openGestureHelp(); break;
             default: change(x < getWidth() * .60f ? -1 : 1); break;
         }
         invalidate();
@@ -83,17 +93,27 @@ final class PortSettingsView extends View {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_CANCEL) { cancelGesture(); return true; }
         if (action == MotionEvent.ACTION_DOWN) {
-            if (!entryArea(event.getX(), event.getY())) return false;
+            gestureRow = controllerPage ? controllerRowAt(event.getX(), event.getY()) : -1;
+            if (gestureRow < 0 && !entryArea(event.getX(), event.getY())) return false;
             pointer = event.getPointerId(0); downX = event.getX(); downY = event.getY(); swiping = false; return true;
         }
         int index = event.findPointerIndex(pointer);
         if (index < 0) return false;
         if (Math.hypot(event.getX(index) - downX, event.getY(index) - downY) > getResources().getDisplayMetrics().density * 12) swiping = true;
         if (action == MotionEvent.ACTION_UP) {
-            if (!swiping && entryArea(event.getX(index), event.getY(index))) activity.openPortSettings();
+            if (!swiping && controllerPage && gestureRow == controllerRowAt(event.getX(index), event.getY(index))) {
+                if (gestureRow == 0) activity.toggleControllerVibration();
+                else if (gestureRow == 1) activity.toggleDeviceVibration();
+                invalidate();
+            } else if (!swiping && entryArea(event.getX(index), event.getY(index))) activity.openPortSettings();
             cancelGesture();
         }
         return true;
+    }
+    private int controllerRowAt(float x, float y) {
+        if (x < getWidth() * .04f || x > getWidth() * .96f) return -1;
+        float row = (y / getHeight() * 480 - 118) / 29;
+        return row >= 0 && row < 2 ? (int)row : -1;
     }
     boolean onTouch(MotionEvent event) {
         if (!full) return onEntryTouch(event);
@@ -180,19 +200,25 @@ final class PortSettingsView extends View {
         int color = selected == index ? 0xFF161616 : 0xFFD0D0D0;
         String shown = fit(value, size, right - left - h * 2);
         text(canvas, shown, (left + right - paint.measureText(shown)) / 2, y + h * .64f, size, color, false);
-        if (index != 3 && index != 4 && index != 10) {
+        if (index != 3 && index != 4 && index != 12) {
             text(canvas, "‹", left + h * .45f, y + h * .64f, size, color, false);
             text(canvas, "›", right - h * .65f, y + h * .64f, size, color, false);
         }
     }
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (!full) {
-            if (entry && entryBounds[1] >= 100f / 480 && entryBounds[1] + entryBounds[3] <= 420f / 480)
-                text(canvas, activity.tr("ADDITIONAL SETTINGS", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"), entryBounds[0] * getWidth(),
-                (entryBounds[1] + entryBounds[3] * .77f) * getHeight(), entryBounds[3] * getHeight() * .65f, entrySelected ? 0xFFFFC030 : 0xFFFFFFFF, true);
-            return;
+        if (!full && controllerPage) {
+            float w = getWidth(), h = getHeight();
+            String[] captions = {"[LB] " + activity.tr("Controller vibration", "Вибрация геймпада"), "[RB] " + activity.tr("Device vibration", "Вибрация устройства")};
+            boolean[] values = {activity.controllerVibration, activity.deviceVibration};
+            for (int i = 0; i < captions.length; ++i) {
+                float y = (130 + i * 29) * h / 480;
+                paint.setColor(0x30FFFFFF); canvas.drawRect(w * .04f, y - h * .025f, w * .96f, y + h * .025f, paint);
+                text(canvas, captions[i], w * .07f, y + h * .01f, h * .03f, 0xFFFFFFFF, false);
+                text(canvas, values[i] ? "On" : "Off", w * .83f, y + h * .01f, h * .03f, 0xFFFFFFFF, false);
+            }
         }
+        if (!full) return;
         canvas.drawColor(0xA0080808);
         paint.setColor(0xFF080808);
         canvas.drawRect(0, 0, getWidth(), getHeight() * .215f + safeTop, paint);
@@ -217,19 +243,24 @@ final class PortSettingsView extends View {
             for (int i = 0; i < lines.length; ++i) text(canvas, fit(lines[i], h * .029f, w * .90f), w * .045f, h * (.28f + i * .057f), h * .029f, 0xFFFFFFFF, false);
         } else {
             int clip = canvas.save(); canvas.clipRect(0, top(), w, bottom());
-            row(canvas, 0, activity.tr("Steering in races", "Управление в гонке"), activity.steeringName());
-            row(canvas, 1, activity.tr("Touch layout", "Сенсорная раскладка"), activity.layoutName());
+            row(canvas, 0, activity.tr("Steering", "Руление"), activity.steeringName());
+            row(canvas, 1, activity.tr("Minigun cruise control", "Круиз-контроль минигана"), activity.minigunCruise ? "On" : "Off");
             row(canvas, 2, activity.tr("Tilt sensitivity", "Чувствительность наклона"), activity.sensitivityName());
             row(canvas, 3, activity.tr("Calibrate tilt", "Калибровка наклона"), activity.tr("Apply", "Применить"));
             row(canvas, 4, activity.tr("Edit touch controls", "Изменить сенсорные кнопки"), activity.tr("Open", "Открыть"));
-            row(canvas, 5, activity.tr("FPS limit", "Ограничение FPS"), activity.fpsLabel());
-            row(canvas, 6, activity.tr("On-screen controls", "Наэкранное управление"), activity.drivingControls.isEnabled() ? activity.tr("On", "Вкл") : activity.tr("Off", "Выкл"));
+            row(canvas, 5, activity.tr("Instant digital steering", "Мгновенное руление стрелками"), activity.instantSteering ? "On" : "Off");
+            row(canvas, 6, activity.tr("On-screen controls", "Наэкранное управление"), activity.drivingControls.isEnabled() ? "On" : "Off");
             row(canvas, 7, activity.tr("UI scale", "Масштаб интерфейса"), activity.uiScaleLabel());
             row(canvas, 8, activity.tr("3D scale *", "Масштаб 3D *"), activity.renderScaleLabel());
-            row(canvas, 9, activity.tr("Language *", "Язык *"), activity.languageName());
-            row(canvas, 10, activity.tr("Gesture help", "Справка по жестам"), activity.tr("Open", "Открыть"));
+            row(canvas, 9, activity.tr("Upscaling / AA *", "Апскейлинг / сглаживание *"), activity.upscalerName());
+            row(canvas, 10, activity.tr("World aspect ratio", "Пропорции мира"), activity.aspectCorrection ? activity.tr("Corrected", "Исправленные") : activity.tr("Original", "Оригинальные"));
+            row(canvas, 11, activity.tr("Language *", "Язык *"), activity.languageName());
+            row(canvas, 12, activity.tr("Gesture help", "Справка по жестам"), activity.tr("Open", "Открыть"));
+            row(canvas, 13, activity.tr("Steering sensitivity", "Чувствительность поворота"), (activity.turnSensitivity * 10) + "%");
+            row(canvas, 14, activity.tr("Controller vibration", "Вибрация геймпада"), activity.controllerVibration ? "On" : "Off");
+            row(canvas, 15, activity.tr("Device vibration", "Вибрация устройства"), activity.deviceVibration ? "On" : "Off");
             canvas.restoreToCount(clip);
-            float visible = bottom() - top(), content = 11 * rowHeight();
+            float visible = bottom() - top(), content = ROWS * rowHeight();
             if (content > visible) {
                 float thumb = visible * visible / content, y = top() + (visible - thumb) * scroll / (content - visible);
                 paint.setColor(0x99FFFFFF); canvas.drawRoundRect(w * .986f, y, w * .993f, y + thumb, 4, 4, paint);

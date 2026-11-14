@@ -190,6 +190,18 @@ public final class WorkshopStore {
         records.remove(record); save();
     }
 
+    public synchronized void removeAllInstalled() throws IOException {
+        for (Record record : new ArrayList<>(records)) if (record.installed(root)) {
+            ++record.generation;
+            if (!record.payload.isEmpty()) retired.add(record.payload);
+            if (!record.pending.isEmpty()) retired.add(record.pending);
+            records.remove(record);
+        }
+        save();
+        HttpURLConnection connection = activeConnection;
+        if (activeId != null && find(activeId) == null && connection != null) connection.disconnect();
+    }
+
     public synchronized void kick() {
         boolean pending = false;
         for (Record record : records) if (record.status.equals("queued")) { pending = true; break; }

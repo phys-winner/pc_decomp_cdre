@@ -320,7 +320,7 @@ void d3d_rt_start(void)
     if (threaded >= 0) return;
     threaded = switched_on();
     if (!threaded) { void_log("[rt] render thread off: GL calls run inline"); return; }
-    ring = (uint8_t *)aligned_alloc(64, RING_BYTES);
+    if (posix_memalign((void **)&ring, 64, RING_BYTES)) ring = NULL;
     if (!ring || pthread_create(&render_thread, NULL, render_main, NULL) != 0) {
         void_log("[rt] no render thread: GL calls run inline");
         free(ring);
@@ -549,6 +549,8 @@ _Static_assert(TARGETS_AT + sizeof(targets_t) <= UINT16_MAX * 4u,
 _Static_assert(sizeof(d3d_state) % 4u == 0, "state patches move whole words");
 #define CONSTANTS_LO ((uint32_t)offsetof(d3d_state, vs_f))
 #define CONSTANTS_HI ((uint32_t)offsetof(d3d_state, viewport))
+_Static_assert(CONSTANTS_LO % 64u == 0 && CONSTANTS_HI % 64u == 0,
+    "render-state pieces must not mix transform metadata with shader constants");
 extern uint32_t d3d_constant_generation;
 
 d3d_device *d3d_rt_device(void) { return &mirror; }

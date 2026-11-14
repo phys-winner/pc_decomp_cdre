@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "profile_sha256": "d14d2c299d60427d2b9e5867ceffd777148111db95fa7eb3a5648731f80752d2",
+  "compiler": "Android NDK 27.2.12479018 / LLVM 18",
+  "game_original_sha256": "8d1cfcda173be0765d851adea881efc6d6b5521ca911f9665c2632f6b700c966",
+  "replay_sha256": "1f60cf3d4abc58ce8f99d924dc2401bd49db1569e1e05c026e75423358062228",
+  "training_window_seconds": [
+    18,
+    108
+  ],
+  "source_profile_sha256": "a6ff44055e62e5a0d0cbe79ad995c31bef18f1c52382162dc5a1b7c2ddc9e8f5",
+  "sparse": true
+}

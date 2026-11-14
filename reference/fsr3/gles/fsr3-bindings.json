@@ -1,0 +1,877 @@
+{
+  "ffx_fsr3upscaler_accumulate_pass": {
+    "srvs": [
+      {
+        "name": "r_input_color_jittered",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_internal_upscaled_color",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_farthest_depth_mip1",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_luma_instability",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      },
+      {
+        "name": "r_lanczos_lut",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_reactive_masks",
+        "type": "sampler2D",
+        "linear": true
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_internal_upscaled_color",
+        "format": "rgba16f",
+        "binding": 0
+      },
+      {
+        "name": "rw_upscaled_output",
+        "format": "rgba16f",
+        "binding": 1
+      },
+      {
+        "name": "rw_new_locks",
+        "format": "rgba8",
+        "binding": 2
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_internal_upscaled_color",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_upscaled_output",
+        "resource": 1,
+        "binding": 1,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_new_locks",
+        "resource": 2,
+        "binding": 2,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_new_locks_read",
+        "resource": 2,
+        "binding": 3,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "read"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_accumulate_pass_sharp": {
+    "srvs": [
+      {
+        "name": "r_input_color_jittered",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_internal_upscaled_color",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_farthest_depth_mip1",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_luma_instability",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      },
+      {
+        "name": "r_lanczos_lut",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_reactive_masks",
+        "type": "sampler2D",
+        "linear": true
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_internal_upscaled_color",
+        "format": "rgba16f",
+        "binding": 0
+      },
+      {
+        "name": "rw_upscaled_output",
+        "format": "rgba16f",
+        "binding": 1
+      },
+      {
+        "name": "rw_new_locks",
+        "format": "rgba8",
+        "binding": 2
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_internal_upscaled_color",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_new_locks",
+        "resource": 2,
+        "binding": 1,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_new_locks_read",
+        "resource": 2,
+        "binding": 2,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "read"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_autogen_reactive_pass": {
+    "srvs": [
+      {
+        "name": "r_input_color_jittered",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_opaque_only",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_output_autoreactive",
+        "format": "r32f",
+        "binding": 0
+      },
+      {
+        "name": "rw_output_autocomposition",
+        "format": "r32f",
+        "binding": 1
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_output_autoreactive",
+        "resource": 0,
+        "binding": 0,
+        "format": "r32f",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      },
+      {
+        "name": "cbGenerateReactive",
+        "block": "cbGenerateReactive_t",
+        "binding": 1
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_debug_view_pass": {
+    "srvs": [
+      {
+        "name": "r_internal_upscaled_color",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_depth",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      },
+      {
+        "name": "r_dilated_reactive_masks",
+        "type": "sampler2D",
+        "linear": true
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_upscaled_output",
+        "format": "rgba16f",
+        "binding": 0
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_upscaled_output",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_luma_instability_pass": {
+    "srvs": [
+      {
+        "name": "r_luma_history",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_farthest_depth_mip1",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      },
+      {
+        "name": "r_dilated_reactive_masks",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_frame_info",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_luma_history",
+        "format": "rgba8",
+        "binding": 0
+      },
+      {
+        "name": "rw_luma_instability",
+        "format": "rgba16f",
+        "binding": 1
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_luma_history",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_luma_instability",
+        "resource": 1,
+        "binding": 1,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_luma_pyramid_pass": {
+    "srvs": [
+      {
+        "name": "r_farthest_depth",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_farthest_depth_mip1",
+        "format": "rgba16f",
+        "binding": 0
+      },
+      {
+        "name": "rw_frame_info",
+        "format": "rgba32f",
+        "binding": 1
+      },
+      {
+        "name": "rw_spd_mip0",
+        "format": "rgba16f",
+        "binding": 2
+      },
+      {
+        "name": "rw_spd_mip1",
+        "format": "rgba16f",
+        "binding": 3
+      },
+      {
+        "name": "rw_spd_mip2",
+        "format": "rgba16f",
+        "binding": 4
+      },
+      {
+        "name": "rw_spd_mip3",
+        "format": "rgba16f",
+        "binding": 5
+      },
+      {
+        "name": "rw_spd_mip4",
+        "format": "rgba16f",
+        "binding": 6
+      },
+      {
+        "name": "rw_spd_mip5",
+        "format": "rgba16f",
+        "binding": 7
+      },
+      {
+        "name": "rw_spd_global_atomic",
+        "format": "r32ui",
+        "binding": 8
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_spd_pyramid",
+        "resource": 2,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": true,
+        "access": "write"
+      },
+      {
+        "name": "rw_spd_pyramid_read",
+        "resource": 2,
+        "binding": 1,
+        "format": "rgba16f",
+        "atlas": true,
+        "access": "read"
+      },
+      {
+        "name": "rw_farthest_depth_mip1",
+        "resource": 0,
+        "binding": 2,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_frame_info",
+        "resource": 1,
+        "binding": 3,
+        "format": "rgba32f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_frame_info_read",
+        "resource": 1,
+        "binding": 4,
+        "format": "rgba32f",
+        "atlas": false,
+        "access": "read"
+      },
+      {
+        "name": "rw_spd_global_atomic",
+        "resource": 8,
+        "binding": 5,
+        "format": "r32ui",
+        "atlas": false,
+        "access": "readwrite"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      },
+      {
+        "name": "cbSPD",
+        "block": "cbSPD_t",
+        "binding": 1
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_prepare_inputs_pass": {
+    "srvs": [
+      {
+        "name": "r_input_depth",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_color_jittered",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_motion_vectors",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_farthest_depth",
+        "format": "rgba16f",
+        "binding": 0
+      },
+      {
+        "name": "rw_current_luma",
+        "format": "rgba16f",
+        "binding": 1
+      },
+      {
+        "name": "rw_reconstructed_previous_nearest_depth",
+        "format": "r32ui",
+        "binding": 2
+      },
+      {
+        "name": "rw_dilated_depth",
+        "format": "r32f",
+        "binding": 3
+      },
+      {
+        "name": "rw_dilated_motion_vectors",
+        "format": "rgba16f",
+        "binding": 4
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_farthest_depth",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_current_luma",
+        "resource": 1,
+        "binding": 1,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_reconstructed_previous_nearest_depth",
+        "resource": 2,
+        "binding": 2,
+        "format": "r32ui",
+        "atlas": false,
+        "access": "readwrite"
+      },
+      {
+        "name": "rw_dilated_depth",
+        "resource": 3,
+        "binding": 3,
+        "format": "r32f",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_dilated_motion_vectors",
+        "resource": 4,
+        "binding": 4,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_prepare_reactivity_pass": {
+    "srvs": [
+      {
+        "name": "r_reactive_mask",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_transparency_and_composition_mask",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_accumulation",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_shading_change",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_reconstructed_previous_nearest_depth",
+        "type": "usampler2D",
+        "linear": false
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_depth",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_accumulation",
+        "format": "rgba8",
+        "binding": 0
+      },
+      {
+        "name": "rw_new_locks",
+        "format": "rgba8",
+        "binding": 1
+      },
+      {
+        "name": "rw_dilated_reactive_masks",
+        "format": "rgba8",
+        "binding": 2
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_accumulation",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_new_locks",
+        "resource": 1,
+        "binding": 1,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      },
+      {
+        "name": "rw_dilated_reactive_masks",
+        "resource": 2,
+        "binding": 2,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_rcas_pass": {
+    "srvs": [
+      {
+        "name": "r_rcas_input",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_upscaled_output",
+        "format": "rgba16f",
+        "binding": 0
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_upscaled_output",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      },
+      {
+        "name": "cbRCAS",
+        "block": "cbRCAS_t",
+        "binding": 1
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_shading_change_pass": {
+    "srvs": [
+      {
+        "name": "r_spd_mips",
+        "type": "sampler2D",
+        "linear": true
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_shading_change",
+        "format": "rgba8",
+        "binding": 0
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_shading_change",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba8",
+        "atlas": false,
+        "access": "write"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      }
+    ]
+  },
+  "ffx_fsr3upscaler_shading_change_pyramid_pass": {
+    "srvs": [
+      {
+        "name": "r_current_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_previous_luma",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_dilated_motion_vectors",
+        "type": "sampler2D",
+        "linear": true
+      },
+      {
+        "name": "r_input_exposure",
+        "type": "sampler2D",
+        "linear": false
+      }
+    ],
+    "images": [
+      {
+        "name": "rw_spd_mip0",
+        "format": "rgba16f",
+        "binding": 0
+      },
+      {
+        "name": "rw_spd_mip1",
+        "format": "rgba16f",
+        "binding": 1
+      },
+      {
+        "name": "rw_spd_mip2",
+        "format": "rgba16f",
+        "binding": 2
+      },
+      {
+        "name": "rw_spd_mip3",
+        "format": "rgba16f",
+        "binding": 3
+      },
+      {
+        "name": "rw_spd_mip4",
+        "format": "rgba16f",
+        "binding": 4
+      },
+      {
+        "name": "rw_spd_mip5",
+        "format": "rgba16f",
+        "binding": 5
+      },
+      {
+        "name": "rw_spd_global_atomic",
+        "format": "r32ui",
+        "binding": 6
+      }
+    ],
+    "physicalImages": [
+      {
+        "name": "rw_spd_pyramid",
+        "resource": 0,
+        "binding": 0,
+        "format": "rgba16f",
+        "atlas": true,
+        "access": "write"
+      },
+      {
+        "name": "rw_spd_pyramid_read",
+        "resource": 0,
+        "binding": 1,
+        "format": "rgba16f",
+        "atlas": true,
+        "access": "read"
+      },
+      {
+        "name": "rw_spd_global_atomic",
+        "resource": 6,
+        "binding": 2,
+        "format": "r32ui",
+        "atlas": false,
+        "access": "readwrite"
+      }
+    ],
+    "buffers": [
+      {
+        "name": "cbFSR3Upscaler",
+        "block": "cbFSR3UPSCALER_t",
+        "binding": 0
+      },
+      {
+        "name": "cbSPD",
+        "block": "cbSPD_t",
+        "binding": 1
+      }
+    ]
+  }
+}

@@ -237,6 +237,7 @@ typedef struct d3d_state {
     void *indices;
     void *decl;
     uint32_t fvf;
+    uint32_t world_identity;      /* Use pointer-alignment padding; keep shader constants on 64-byte boundaries. */
     void *vs, *ps;
     float material[17];
     float lights[8][26];

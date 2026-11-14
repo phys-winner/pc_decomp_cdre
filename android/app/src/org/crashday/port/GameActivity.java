@@ -51,6 +51,13 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     static native void nativeLanguage(String language);
     static native boolean nativeRaceMenuSelect(float x, float y);
     static native float[] nativeSettingsEntry();
+    static native void nativeSettingsCaption(String text);
+    static native void nativeAspectCorrection(boolean enabled);
+    static native void nativeInstantSteering(boolean enabled);
+    static native void nativeSteeringDigital(boolean digital);
+    static native int nativeRumble(boolean clear);
+    static native void nativeUpscaler(int mode);
+    static native int nativeUpscalerStatus();
     static native int nativeMenuControl(float x, float y);
     static native boolean nativeMenuOption(int direction);
     static native void nativeMenuOverlay(boolean shown);
@@ -102,16 +109,26 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private android.app.AlertDialog inputDialog;
     private boolean inputPrompted, externalInputAttached;
     private final GamepadInput gamepad = new GamepadInput();
+    private GameVibration vibration;
+    private final Runnable vibrationPoll = new Runnable() {
+        @Override public void run() {
+            if (!activityResumed) return;
+            vibration.update(gameReady ? nativeRumble(false) : 0, gamepad.deviceId(), controllerVibration, deviceVibration);
+            handler.postDelayed(this, 33);
+        }
+    };
     private final android.hardware.input.InputManager.InputDeviceListener deviceListener =
         new android.hardware.input.InputManager.InputDeviceListener() {
             @Override public void onInputDeviceAdded(int id) { inputDevicesChanged(); }
             @Override public void onInputDeviceChanged(int id) { gamepad.removed(id); inputDevicesChanged(); }
             @Override public void onInputDeviceRemoved(int id) { cancelInput(); inputDevicesChanged(); }
         };
-    int steeringMode, controlLayout, steeringSensitivity, uiScale = 100, renderScale = 100;
-    private int runningRenderScale;
+    int steeringMode, steeringSensitivity, turnSensitivity = 10, uiScale = 100, renderScale = 100;
+    boolean minigunCruise, instantSteering, aspectCorrection, controllerVibration, deviceVibration;
+    int upscaler;
+    private int runningRenderScale, runningUpscaler;
     private String language, runningLanguage;
-    private int settingsRenderScale;
+    private int settingsRenderScale, settingsUpscaler;
     private String settingsLanguage;
     private static final String[] LANGUAGES = GameLanguage.VALUES;
     private static final String[] LANGUAGE_NAMES = GameLanguage.NAMES;
@@ -146,6 +163,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                 launch.firstFrame(root);
                 offerTouchVisibility();
             } else if (result != Integer.MIN_VALUE) {
+                gameReady = false;
+                vibration.stop(); nativeRumble(true);
                 if (result == 0) {
                     launch.exited(0);
                     return;
@@ -184,30 +203,49 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         settingsDirections = 0;
         profileClick = false;
         gamepad.release();
+        if (vibration != null) vibration.stop();
+        nativeRumble(true);
         nativeCancelInput();
     }
 
     private void applySafeInsets(android.view.WindowInsets insets) {
-        android.graphics.Insets safe = insets.getInsets(
-            android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
-        boolean shown = insets.isVisible(android.view.WindowInsets.Type.ime());
+        int left, top, right, bottom;
+        boolean shown;
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Insets safe = insets.getInsets(
+                android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+            left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom;
+            shown = insets.isVisible(android.view.WindowInsets.Type.ime());
+        } else {
+            left = insets.getSystemWindowInsetLeft(); top = insets.getSystemWindowInsetTop();
+            right = insets.getSystemWindowInsetRight(); bottom = insets.getSystemWindowInsetBottom();
+            shown = bottom > insets.getStableInsetBottom() + Math.round(100 * getResources().getDisplayMetrics().density);
+            if (shown) bottom = insets.getStableInsetBottom();
+            if (Build.VERSION.SDK_INT >= 28) {
+                android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                if (cutout != null) {
+                    left = Math.max(left, cutout.getSafeInsetLeft()); top = Math.max(top, cutout.getSafeInsetTop());
+                    right = Math.max(right, cutout.getSafeInsetRight()); bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                }
+            }
+        }
         if (shown) imeVisible = true;
         else if (imeVisible) {
             imeVisible = false;
             if (textEditorActive) closeTextEditor();
         }
         cancelInput();
-        drivingControls.setSafeInsets(safe.left, safe.top, safe.right, safe.bottom);
-        sceneControls.setSafeInsets(safe.left, safe.top, safe.right, safe.bottom);
-        portSettings.setSafeInsets(safe.left, safe.top, safe.right, safe.bottom);
+        drivingControls.setSafeInsets(left, top, right, bottom);
+        sceneControls.setSafeInsets(left, top, right, bottom);
+        portSettings.setSafeInsets(left, top, right, bottom);
         FrameLayout.LayoutParams drive = (FrameLayout.LayoutParams) driveButton.getLayoutParams();
-        drive.setMargins(safe.left, 0, safe.right, safe.bottom);
+        drive.setMargins(left, 0, right, bottom);
         driveButton.setLayoutParams(drive);
         FrameLayout.LayoutParams next = (FrameLayout.LayoutParams) continueButton.getLayoutParams();
-        next.setMargins(0, 0, safe.right + Math.round(12 * getResources().getDisplayMetrics().density), safe.bottom);
+        next.setMargins(0, 0, right + Math.round(12 * getResources().getDisplayMetrics().density), bottom);
         continueButton.setLayoutParams(next);
         FrameLayout.LayoutParams message = (FrameLayout.LayoutParams) status.getLayoutParams();
-        message.setMargins(safe.left, 0, safe.right, safe.bottom);
+        message.setMargins(left, 0, right, bottom);
         status.setLayoutParams(message);
     }
 
@@ -219,10 +257,6 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         } else {
             cancelInput();
         }
-    }
-
-    private static float maximum(float[] values) {
-        return values.length == 0 ? 60 : values[values.length - 1];
     }
 
     private void refreshFpsRates() {
@@ -237,8 +271,6 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         Collections.sort(values);
         fpsRates = new float[values.size()];
         for (int i = 0; i < values.size(); ++i) fpsRates[i] = values.get(i);
-        float fallback = maximum(fpsRates);
-        if (!fpsQaOverride && fpsLimit != 0 && !containsFps(fpsLimit)) fpsLimit = fallback;
     }
 
     private boolean containsFps(float rate) {
@@ -248,14 +280,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
 
     private float fpsValue() {
         float active = displayRate > 0 ? displayRate : Math.max(.001f, getWindowManager().getDefaultDisplay().getRefreshRate());
-        return fpsLimit == 0 ? active : Math.min(fpsLimit, active);
+        return !fpsQaOverride || fpsLimit == 0 ? active : Math.min(fpsLimit, active);
     }
-
-    private static String rateLabel(float value) {
-        return String.format(Locale.ROOT, "%.2f", value).replaceAll("0+$", "").replaceAll("\\.$", "");
-    }
-
-    String fpsLabel() { return fpsLimit == 0 ? tr("Display rate", "Частота экрана") : rateLabel(fpsLimit); }
 
     private void applyFps() {
         refreshFpsRates();
@@ -288,16 +314,6 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         }
     }
 
-    void cycleFps(int direction) {
-        fpsQaOverride = false;
-        int count = fpsRates.length + 1, index = fpsRates.length;
-        for (int i = 0; i < fpsRates.length; ++i) if (Math.abs(fpsRates[i] - fpsLimit) < .01f) { index = i; break; }
-        index = (index + direction + count) % count;
-        fpsLimit = index == fpsRates.length ? 0 : fpsRates[index];
-        preferences.edit().putFloat("fpsLimit", fpsLimit).apply();
-        applyFps();
-    }
-
     String uiScaleLabel() { return uiScale + "%"; }
 
     void changeUiScale(int direction) {
@@ -312,7 +328,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     String renderScaleLabel() { return renderScale + "%"; }
 
     void changeRenderScale(int direction) {
-        int[] values = {25, 50, 75, 100};
+        int[] values = {25, 50, 75, 100, 125, 150, 175, 200};
         int index = values.length - 1;
         for (int i = 0; i < values.length; ++i) if (values[i] == renderScale) index = i;
         renderScale = values[(index + direction + values.length) % values.length];
@@ -347,27 +363,34 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         uiScale = getIntent().getIntExtra("uiScale", preferences.getInt("uiScale", 100));
         renderScale = getIntent().getIntExtra("renderScale", preferences.getInt("renderScale", 100));
         if (uiScale != 100 && uiScale != 125 && uiScale != 150) uiScale = 100;
-        if (renderScale != 25 && renderScale != 50 && renderScale != 75 && renderScale != 100) renderScale = 100;
+        if (renderScale < 25 || renderScale > 200 || renderScale % 25 != 0) renderScale = 100;
         language = GameLanguage.validate(qaPreferences ? preferences.getString("language", "system") : launch.option("game_language"));
         runningRenderScale = renderScale;
         runningLanguage = GameLanguage.resolve(language, Locale.getDefault());
         nativeLanguage(runningLanguage);
         nativeUiScale(uiScale);
         steeringMode = preferences.getInt("steeringMode", DrivingControls.STEERING_ARROWS);
-        controlLayout = preferences.getInt("controlLayout", DrivingControls.LAYOUT_AUTO);
+        if (steeringMode < 0 || steeringMode >= DrivingControls.STEERING_COUNT) steeringMode = DrivingControls.STEERING_ARROWS;
+        minigunCruise = preferences.getBoolean("minigunCruise", false);
+        instantSteering = preferences.getBoolean("instantSteering", false);
+        aspectCorrection = getIntent().getBooleanExtra("aspectCorrection", preferences.getBoolean("aspectCorrection", true));
+        turnSensitivity = Math.max(1, Math.min(20, preferences.getInt("turnSensitivity", 10)));
+        controllerVibration = preferences.getBoolean("controllerVibration", true);
+        deviceVibration = preferences.getBoolean("deviceVibration", true);
+        vibration = new GameVibration(this);
+        upscaler = getIntent().getIntExtra("upscaler", preferences.getInt("upscaler", 0));
+        if (upscaler < 0 || upscaler > 2) upscaler = 0;
+        runningUpscaler = upscaler;
+        nativeUpscaler(upscaler); nativeAspectCorrection(aspectCorrection); nativeInstantSteering(instantSteering);
         steeringSensitivity = preferences.getInt("steeringSensitivity", 10);
-        try {
-            fpsLimit = preferences.getFloat("fpsLimit", 60);
-        } catch (ClassCastException e) {
-            fpsLimit = preferences.getInt("fpsLimit", 60);
-        }
         fpsQaOverride = qaProfile != null && getIntent().hasExtra("fpsLimit");
         displayRate = preferences.getFloat("displayRate", 0);
-        if (fpsQaOverride) fpsLimit = getIntent().getFloatExtra("fpsLimit", fpsLimit);
+        // Graphics owns the user cap; the removed Android preference must not silently override it.
+        fpsLimit = fpsQaOverride ? getIntent().getFloatExtra("fpsLimit", 60) : 0;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
         WindowManager.LayoutParams options = getWindow().getAttributes();
-        options.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30
+        if (Build.VERSION.SDK_INT >= 28) options.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30
             ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         getWindow().setAttributes(options);
@@ -375,7 +398,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         immersive();
         root = new FrameLayout(this);
         root.setBackgroundColor(android.graphics.Color.BLACK);
-        root.setForceDarkAllowed(false);
+        if (Build.VERSION.SDK_INT >= 29) root.setForceDarkAllowed(false);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             applySafeInsets(insets);
             return insets;
@@ -403,7 +426,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         root.addView(textInput);
         drivingControls = new DrivingControls(this, preferencesSuffix);
         drivingControls.setSteeringMode(steeringMode);
-        drivingControls.setLayout(controlLayout);
+        drivingControls.setMinigunCruise(minigunCruise);
         drivingControls.setSensitivity(steeringSensitivity);
         drivingControls.setEnabled(preferences.getBoolean("drivingEnabled", true));
         root.addView(drivingControls);
@@ -470,7 +493,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     int getHeight() { return root.getHeight(); }
 
     void syncMenu() {
-        if (portSettings == null) return;
+        // Native UI queries take the machine lock; rendering may be waiting for this surface.
+        if (portSettings == null || !gameReady || !surfaceReady || !activityResumed) return;
         if (touchEditor) {
             sceneControls.setScene(0, 0, false);
             portSettings.setVisibility(View.GONE);
@@ -481,14 +505,16 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         touchMenu.syncNativeScene();
         sceneControls.setScene(portSettings.isFull() ? 0 : touchMenu.scene(), touchMenu.isReplay() ? nativeReplayState() : 0, drivingControls.isEnabled());
         continueButton.setVisibility(gameReady && touchMenu.isCinematic() ? View.VISIBLE : View.GONE);
+        portSettings.setControllerPage(touchMenu.scene() == 22);
         portSettings.setEntry(touchMenu.isOptions(), touchMenu.selection() == 5);
         boolean activeRace = touchMenu.inGame() && !touchMenu.isPaused() && !touchMenu.awaitingRaceStart();
+        gamepad.setSteering(turnSensitivity, activeRace);
         drivingControls.setInGame(activeRace);
         drivingControls.setPauseHint(activeRace && !portSettings.isFull() && nativeRaceCountdown());
         drivingControls.setWeaponsEnabled(activeRace ? nativeRaceWeapons() : 0x0300);
         boolean showControls = drivingControls.isEnabled() && !portSettings.isFull() && activeRace;
         drivingControls.setVisibility(!portSettings.isFull() && activeRace ? View.VISIBLE : View.GONE);
-        nativeTouchHud(showControls && !drivingControls.isLegacyLayout());
+        nativeTouchHud(showControls);
         drivingControls.publishWeaponHud(showControls);
         driveButton.setText(drivingControls.isEnabled() ? tr("Touch", "Сенсор") : tr("Drive", "Руль"));
         driveButton.setVisibility(View.GONE);
@@ -498,6 +524,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     void openPortSettings() {
         cancelInput();
         settingsRenderScale = renderScale;
+        settingsUpscaler = upscaler;
         settingsLanguage = language;
         touchMenu.onPortSettings();
         drivingControls.setVisibility(View.GONE);
@@ -553,6 +580,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
 
     private void inputDevicesChanged() {
+        if (vibration != null) vibration.refreshController(gamepad.deviceId());
         boolean external = GamepadInput.externalInputAttached();
         if (external != externalInputAttached) {
             externalInputAttached = external;
@@ -627,11 +655,11 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         touchMenu.onSettingsClosed();
         driveButton.setText(drivingControls.isEnabled() ? tr("Touch", "Сенсор") : tr("Drive", "Руль"));
         syncMenu();
-        boolean changed = settingsRenderScale != renderScale || !settingsLanguage.equals(language);
-        if (changed && (runningRenderScale != renderScale || !runningLanguage.equals(GameLanguage.resolve(language, Locale.getDefault())))) {
+        boolean changed = settingsRenderScale != renderScale || settingsUpscaler != upscaler || !settingsLanguage.equals(language);
+        if (changed && (runningRenderScale != renderScale || runningUpscaler != upscaler || !runningLanguage.equals(GameLanguage.resolve(language, Locale.getDefault())))) {
             new android.app.AlertDialog.Builder(this)
                 .setTitle(tr("Restart required", "Нужен перезапуск"))
-                .setMessage(tr("Restart Crashday to apply the new graphics scale and language?", "Перезапустить Crashday, чтобы применить масштаб 3D и язык?"))
+                .setMessage(tr("Restart Crashday to apply the graphics and language settings?", "Перезапустить Crashday, чтобы применить настройки графики и языка?"))
                 .setPositiveButton(tr("Restart now", "Перезапустить сейчас"), (dialog, which) -> {
                     if (!preferences.edit().putInt("renderScale", renderScale).putString("language", language).commit()) {
                         android.widget.Toast.makeText(this, tr("Could not save settings", "Не удалось сохранить настройки"), android.widget.Toast.LENGTH_LONG).show();
@@ -643,6 +671,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                         .putExtra("restartPid", android.os.Process.myPid());
                     restart.removeExtra("renderScale");
                     restart.removeExtra("uiScale");
+                    restart.removeExtra("upscaler");
                     startActivity(restart);
                     finish();
                 })
@@ -651,7 +680,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
 
     void changeSteeringMode(int direction) {
-        int next = (steeringMode + direction + 3) % 3;
+        int next = Math.floorMod(steeringMode + direction, DrivingControls.STEERING_COUNT);
         steeringMode = next;
         preferences.edit().putInt("steeringMode", next).apply();
         drivingControls.setSteeringMode(next);
@@ -659,25 +688,40 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
 
     String steeringName() {
-        String[] english = {"Left stick", "Arrows", "Tilting the phone"};
-        String[] russian = {"Левый стик", "Стрелки", "Наклон телефона"};
-        return "russian".equals(GameLanguage.resolve(language, Locale.getDefault())) ? russian[steeringMode] : english[steeringMode];
+        String[] english = {"Stick", "Two buttons", "Tilting the phone", "Steering wheel"};
+        String[] russian = {"Стик", "Две кнопки", "Наклон телефона", "Руль"};
+        return tr(english[steeringMode], russian[steeringMode]);
     }
 
-    void changeControlLayout(int direction) {
-        int next = controlLayout + direction;
-        if (next > DrivingControls.DRIVING) next = DrivingControls.LAYOUT_AUTO;
-        if (next < DrivingControls.LAYOUT_AUTO) next = DrivingControls.DRIVING;
-        controlLayout = next;
-        preferences.edit().putInt("controlLayout", next).apply();
-        drivingControls.setLayout(next);
-        syncMenu();
+    void toggleMinigunCruise() {
+        minigunCruise = !minigunCruise;
+        preferences.edit().putBoolean("minigunCruise", minigunCruise).apply();
+        drivingControls.setMinigunCruise(minigunCruise);
     }
 
-    String layoutName() {
-        String[] english = {"Auto", "Normal", "Arrows", "Driving"};
-        String[] russian = {"Авто", "Обычная", "Стрелки", "Гонка"};
-        return "russian".equals(GameLanguage.resolve(language, Locale.getDefault())) ? russian[controlLayout + 1] : english[controlLayout + 1];
+    void toggleInstantSteering() {
+        instantSteering = !instantSteering;
+        preferences.edit().putBoolean("instantSteering", instantSteering).apply();
+        nativeInstantSteering(instantSteering);
+    }
+
+    void toggleAspectCorrection() {
+        aspectCorrection = !aspectCorrection;
+        preferences.edit().putBoolean("aspectCorrection", aspectCorrection).apply();
+        nativeAspectCorrection(aspectCorrection);
+    }
+
+    void changeUpscaler(int direction) {
+        upscaler = Math.floorMod(upscaler + direction, 3);
+        preferences.edit().putInt("upscaler", upscaler).apply();
+    }
+
+    String upscalerName() {
+        if (upscaler == 0) return tr("Off", "Выкл");
+        String name = upscaler == 2 ? "FSR 3.1" : "FSR 1 + MSAA";
+        if (renderScale > 100) return name + tr(" (inactive above 100%)", " (неактивен при >100%)");
+        if (upscaler == runningUpscaler && nativeUpscalerStatus() < 0) return name + tr(" (unavailable)", " (недоступен)");
+        return name;
     }
 
     void changeSensitivity(int direction) {
@@ -691,10 +735,28 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     String sensitivityName() {
         return steeringSensitivity + " · " + DrivingControls.fullLockDegrees(steeringSensitivity) + "°";
     }
+
+    void changeTurnSensitivity(int direction) {
+        turnSensitivity = Math.floorMod(turnSensitivity - 1 + direction, 20) + 1;
+        preferences.edit().putInt("turnSensitivity", turnSensitivity).apply();
+        gamepad.setSteering(turnSensitivity, touchMenu.inGame() && !touchMenu.isPaused() && !touchMenu.awaitingRaceStart());
+    }
+
+    void toggleControllerVibration() {
+        controllerVibration = !controllerVibration;
+        preferences.edit().putBoolean("controllerVibration", controllerVibration).apply();
+        vibration.stop(); nativeRumble(true);
+    }
+
+    void toggleDeviceVibration() {
+        deviceVibration = !deviceVibration;
+        preferences.edit().putBoolean("deviceVibration", deviceVibration).apply();
+        vibration.stop(); nativeRumble(true);
+    }
     void calibrateTilt() { drivingControls.calibrate(); }
 
     String tr(String english, String russian) {
-        return "russian".equals(GameLanguage.resolve(language, Locale.getDefault())) ? russian : english;
+        return PortText.get(language, english, russian);
     }
 
     void openGestureHelp() { portSettings.openHelp(); }
@@ -844,6 +906,10 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             if (lanWifiLock != null && !lanWifiLock.isHeld()) lanWifiLock.acquire();
         } catch (RuntimeException e) { android.util.Log.w("Crashday", "LAN discovery lock unavailable", e); }
         activityResumed = true;
+        nativeRumble(true);
+        vibration.refreshController(gamepad.deviceId());
+        handler.removeCallbacks(vibrationPoll);
+        handler.post(vibrationPoll);
         android.util.Log.i("CrashdayLifecycle", "onResume started=" + started);
         if (surface != null && surface.getHolder().getSurface().isValid()) {
             surfaceReady = true;
@@ -855,7 +921,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         refreshFpsRates();
         applyFps();
         drivingControls.setSteeringMode(steeringMode);
-        drivingControls.setLayout(controlLayout);
+        drivingControls.setMinigunCruise(minigunCruise);
         drivingControls.setSensitivity(steeringSensitivity);
         drivingControls.setEnabled(drivingControls.isEnabled());
         nativeDriving(touchMenu.inGame());
@@ -865,6 +931,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
     @Override public void onPause() {
         activityResumed = false;
+        handler.removeCallbacks(vibrationPoll);
+        vibration.stop(); nativeRumble(true);
         if (lanLock != null && lanLock.isHeld()) lanLock.release();
         if (lanWifiLock != null && lanWifiLock.isHeld()) lanWifiLock.release();
         android.util.Log.i("CrashdayLifecycle", "onPause started=" + started);
@@ -875,6 +943,8 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         super.onPause();
     }
     @Override protected void onDestroy() {
+        handler.removeCallbacks(vibrationPoll);
+        if (vibration != null) vibration.stop();
         cancelInput();
         ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE)).unregisterInputDeviceListener(deviceListener);
         drivingControls.setEnabled(false);
@@ -928,6 +998,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             hardwareInput();
             if (touchEditor) return drivingControls.handleMotion(event);
             if (portSettings.isFull()) return portSettings.onTouch(event);
+            if (touchMenu.scene() == 22 && portSettings.onTouch(event)) return true;
             return mouseMotion(surface, event);
         }
         if (hardwareInput && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -1037,6 +1108,14 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                 if (key != 0) portSettings.onKey(key, event.getAction() == KeyEvent.ACTION_DOWN);
                 return key != 0 || super.dispatchKeyEvent(event);
             }
+            if (touchMenu.scene() == 22 && (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_L1 || event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_R1)) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && !event.isCanceled() && event.getRepeatCount() == 0) {
+                    if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_L1) toggleControllerVibration();
+                    else toggleDeviceVibration();
+                    portSettings.invalidate();
+                }
+                return true;
+            }
             if (gamepad.key(event)) return true;
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
@@ -1060,7 +1139,10 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                 return true;
             }
             touchMenu.onNativeKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
-            if (!portSettings.isFull()) nativeKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
+            if (!portSettings.isFull()) {
+                if (vk == 37 || vk == 39) nativeSteeringDigital(true);
+                nativeKey(vk, event.getAction() == KeyEvent.ACTION_DOWN);
+            }
         }
         return true;
     }

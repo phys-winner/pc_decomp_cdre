@@ -1,4 +1,12 @@
 #include <stdint.h>
+double crashday_world_aspect_numerator(void) { return .85; }
+uint32_t crashday_steering_bits(uint32_t car, uint32_t previous) { (void)car; return previous; }
+void void_android_request_refresh(uint32_t rate) { (void)rate; }
+float crashday_hud_y(float y, float offset) { (void)offset; return y; }
+float crashday_weapon_coord(unsigned weapon, unsigned axis, float value, float origin)
+{ (void)weapon; (void)axis; (void)origin; return value; }
+void crashday_cinematic_active(int active) { (void)active; }
+int crashday_ui_list_detached(uint32_t widget) { (void)widget; return 0; }
 
 uint64_t void_audio_pause_state(void) { return 0; }
 void void_android_set_paused(int pause) { (void)pause; }

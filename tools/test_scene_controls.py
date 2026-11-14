@@ -134,7 +134,7 @@ static unsigned char memory[0x900000];
 #define MEM16(a) (*(uint16_t *)(memory+(a)))
 #define MEM8(a) memory[a]
 #define MEMF(a) (*(float *)(memory+(a)))
-static int game_started=1,paused,available=1,scene,calls;
+static int game_started=1,frame_ready=1,paused,available=1,scene,calls;
 static uint32_t editor_request_epoch,g_ecx,g_edx;
 static int void_vm_readable(uint32_t a,unsigned n){return a<sizeof memory&&n<=sizeof memory-a;}
 static int void_audio_pause_state(void){return paused;}

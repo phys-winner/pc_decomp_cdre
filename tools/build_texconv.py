@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build/android/texconv"
 LIBRARY = OUT / "libcrashdaytex.so"
 CXX = CLANG.with_name("clang++.exe")
-TARGET = "aarch64-linux-android30"
+TARGET = "aarch64-linux-android26"
 ASTC = ["-DASTCENC_NEON=1", "-DASTCENC_SVE=0", "-DASTCENC_SSE=0", "-DASTCENC_AVX=0", "-DASTCENC_POPCNT=0", "-DASTCENC_F16C=0"]
 COMMON = ["--target=" + TARGET, "-O2", "-fPIC", "-fvisibility=hidden", "-ffunction-sections", "-fdata-sections", "-std=c++17",
           "-ffile-prefix-map=" + str(ROOT) + "=."]

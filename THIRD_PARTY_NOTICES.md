@@ -13,6 +13,8 @@ port's GPLv3 integration code.
 | [dlmalloc](reference/dlmalloc/malloc.c) | Guest memory allocation | MIT-0 notice in source |
 | [NFSMW-Recompiled-Mobile](licenses/NFSMW-Recompiled-Mobile.txt) | Adapted driving touch controls | GNU GPLv3 |
 | [DXVK](reference/dxvk/LICENSE) | Experimental developer renderer sources | zlib; bundled headers retain their own licenses |
+| [AMD FSR 1](reference/fsr1/license.txt) | Optional EASU/RCAS spatial upscaling | MIT |
+| [AMD FidelityFX SDK](reference/fsr3/LICENSE.txt) | Optional FSR 3.1.4 temporal upscaler; no frame generation | MIT |
 
 The touch-control reference is
 [victorgbd/NFSMW-Recompiled-Mobile](https://github.com/victorgbd/NFSMW-Recompiled-Mobile),
@@ -37,3 +39,9 @@ component licenses exposed by the launcher. Original game files and proprietary
 Microsoft program images are external build inputs and are not relicensed by
 this repository. The canonical generated C preserves the port's current
 recompilation state; it does not change ownership of the original program code.
+
+FSR source revisions and file hashes are pinned in `reference/fsr1/source.json`
+and `reference/fsr3/source.json`. The GLES shader conversion is pinned separately
+in `reference/fsr3/gles/source.json`; regeneration uses the recorded Khronos
+SPIRV-Cross revision. Normal builds embed the verified converted sources without
+requiring SPIRV-Cross or shipping a host compiler.

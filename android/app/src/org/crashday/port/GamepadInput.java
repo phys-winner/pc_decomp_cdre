@@ -8,6 +8,20 @@ final class GamepadInput {
     private int deviceId = Integer.MIN_VALUE, keys, hat;
     private boolean leftButton, rightButton, leftAnalog, rightAnalog;
     private float lx, ly, rx, ry, lt, rt;
+    private int turnSensitivity = 10;
+    private boolean driving;
+
+    static float steering(float value, int sensitivity) {
+        return Math.max(-1, Math.min(1, value * Math.max(1, Math.min(20, sensitivity)) / 10f));
+    }
+
+    void setSteering(int sensitivity, boolean active) {
+        if (turnSensitivity == sensitivity && driving == active) return;
+        turnSensitivity = sensitivity; driving = active;
+        if (deviceId != Integer.MIN_VALUE) send();
+    }
+
+    int deviceId() { return deviceId; }
 
     static boolean externalInputAttached() {
         for (int id : InputDevice.getDeviceIds()) {
@@ -121,8 +135,9 @@ final class GamepadInput {
     }
 
     private void send() {
+        GameActivity.nativeSteeringDigital(false);
         // Physical pads use the original bindings; synthetic driving arrows would fire twice.
-        GameActivity.nativeController(0x10000 | keys | hat, lx, ly, rx, ry,
+        GameActivity.nativeController(0x10000 | keys | hat, driving ? steering(lx, turnSensitivity) : lx, ly, rx, ry,
             leftAnalog ? lt : leftButton ? 1 : 0, rightAnalog ? rt : rightButton ? 1 : 0);
     }
 

@@ -107,7 +107,8 @@ public class GroupUiCheck extends Activity {
         texturesBox=textures,update=new LinearLayout(),about=new LinearLayout();
     final List<Integer> rendered=new ArrayList<>();
     String busy;int busySection;boolean filesExpanded,texturesExpanded;int refreshes;
-    boolean initializing,autoLaunchPending,playRequestedPending,finishing,autoResult;int autoCalls,requestedCalls;
+    boolean initializing,autoLaunchPending,playRequestedPending,touching,finishing,autoResult;int autoCalls,requestedCalls;
+    final Set<Integer> refreshPending=new LinkedHashSet<>();
     boolean autoLaunch(){++autoCalls;return autoResult;}void playRequested(){++requestedCalls;}
     boolean isFinishing(){return finishing;}boolean convertedTextures(){return false;}
     boolean idle(){return !initializing&&busy==null&&!Work.busy();}

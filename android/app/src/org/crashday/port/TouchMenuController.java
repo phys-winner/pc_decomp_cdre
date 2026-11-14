@@ -6,7 +6,7 @@ final class TouchMenuController {
     private static final int MAIN = 0, EVENT = 1, SETUP = 2, TRACK = 3, CAR = 4,
         OPTIONS = 5, BROWSER = 6, PAUSE = 7, OTHER = 8, GAME = 9, CUSTOM = 10, ORIGINAL_CONTROLS = 11, GAME_OPTIONS = 12,
         LOADING = 13, READY = 14, INTRO_CONTROLLER = 15, CINEMATIC = 16, WRECKED = 17, FINISHED = 18,
-        EDITOR = 19, REPLAY = 20;
+        EDITOR = 19, REPLAY = 20, CREDITS = 21;
 
     private final GameActivity activity;
     private int screen = MAIN, selection, raceConfirmations, pointer = -1;
@@ -259,11 +259,13 @@ final class TouchMenuController {
     }
 
     private void stepOption(float x) {
-        float step = activity.getResources().getDisplayMetrics().density * 32;
+        boolean car = screen == CAR && gestureControl == 0;
+        float step = activity.getResources().getDisplayMetrics().density * (car ? 64 : 32);
         optionRemainder += x - lastOptionX;
         lastOptionX = x;
         int steps = Math.max(-16, Math.min(16, (int) (optionRemainder / step)));
-        for (int i = 0; i < Math.abs(steps); ++i) GameActivity.nativeMenuOption(steps > 0 ? 1 : -1);
+        for (int i = 0; i < Math.abs(steps); ++i)
+            GameActivity.nativeMenuOption((steps > 0 ? 1 : -1) * (car ? -1 : 1));
         optionRemainder -= steps * step;
     }
 
@@ -278,8 +280,8 @@ final class TouchMenuController {
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             if (pointer >= 0) return true;
             pointer = id;
-            lastX = downX = event.getRawX(index);
-            lastY = downY = lastWheelY = event.getRawY(index);
+            lastX = downX = event.getX(index) + event.getRawX() - event.getX();
+            lastY = downY = lastWheelY = event.getY(index) + event.getRawY() - event.getY();
             wheelRemainder = optionRemainder = 0;
             lastOptionX = downX;
             swiping = dragging = holding = false;
@@ -295,14 +297,16 @@ final class TouchMenuController {
                 return true;
             }
         } else if (id != pointer) return true;
+        boolean car = screen == CAR && gestureControl == 0;
         if (action == MotionEvent.ACTION_MOVE) {
-            float x = event.getRawX(index), y = event.getRawY(index);
+            float x = event.getX(index) + event.getRawX() - event.getX();
+            float y = event.getY(index) + event.getRawY() - event.getY();
             float dx = x - downX, dy = y - downY;
             float threshold = activity.getResources().getDisplayMetrics().density * 16;
             lastX = x;
             lastY = y;
             if (dragging) {
-                if (gestureControl == 2) stepOption(x);
+                if (gestureControl == 2 || car) stepOption(x);
                 else if (gestureControl == 1) sendPointer();
                 return true;
             }
@@ -324,7 +328,8 @@ final class TouchMenuController {
             if (!dragging && Math.abs(dx) >= threshold && Math.abs(dx) > Math.abs(dy)) {
                 dragging = true;
                 cancelHold();
-                if (gestureControl == 1) {
+                if (car) stepOption(x);
+                else if (gestureControl == 1) {
                     sendPointer();
                     GameActivity.nativeButton(true);
                 } else if (gestureControl == 2) stepOption(x);
@@ -335,12 +340,12 @@ final class TouchMenuController {
             return true;
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
-            lastX = event.getRawX(index);
-            lastY = event.getRawY(index);
+            lastX = event.getX(index) + event.getRawX() - event.getX();
+            lastY = event.getY(index) + event.getRawY() - event.getY();
             if (!swiping && (!dragging || gestureControl == 1)) sendPointer();
             cancelHold();
             if (dragging && gestureControl == 1) GameActivity.nativeButton(false);
-            if (dragging && gestureControl == 2) stepOption(lastX);
+            if (dragging && (gestureControl == 2 || car)) stepOption(lastX);
             if (!swiping && !holding && !dragging) {
                 if (GameActivity.nativeProfileHit(activity.pointerX(lastX), activity.pointerY(lastY))) {
                     pointer = -1;
@@ -354,6 +359,8 @@ final class TouchMenuController {
                     pulse(13);
                 } else if (screen == PAUSE) {
                     if (GameActivity.nativeRaceMenuSelect(activity.pointerX(lastX), activity.pointerY(lastY))) pulse(13);
+                } else if (screen == CREDITS && activity.pointerX(lastX) >= .8f && activity.pointerY(lastY) >= .8f) {
+                    pulse(27);
                 } else {
                     GameActivity.nativeButton(true);
                     GameActivity.nativeButton(false);

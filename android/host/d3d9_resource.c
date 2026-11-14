@@ -1663,6 +1663,7 @@ static const stateblock_ex *stateblock_plan(d3d_stateblock *sb)
     plan_items(x, offsetof(d3d_state, stream_stride), 4, sb->rec_stream, 16);
     plan_items(x, offsetof(d3d_state, stream_freq), 4, sb->rec_stream, 16);
     if (sb->rec_fvf) plan_add(x, offsetof(d3d_state, fvf), sizeof sb->state.fvf);
+    if (sb->rec_transform[256]) plan_items(x, offsetof(d3d_state, world_identity), 4, sb->rec_transform + 256, 1);
     if (sb->rec_material) plan_add(x, offsetof(d3d_state, material), sizeof sb->state.material);
     plan_items(x, offsetof(d3d_state, lights), sizeof sb->state.lights[0], sb->rec_light, 8);
     plan_items(x, offsetof(d3d_state, light_enable), sizeof sb->state.light_enable[0], sb->rec_light, 8);

@@ -39,7 +39,9 @@ public class DrivingControlsProbe {
   int getWidth(){return W;}int getHeight(){return H;}int getVisibility(){return visibility;}void setVisibility(int v){visibility=v;}
   Display getDisplay(){return null;}void setEnabled(boolean v){}boolean isEnabled(){return true;}
   void setWillNotDraw(boolean b){}void setFocusable(boolean b){}void invalidate(){}
-  void postDelayed(Runnable r,long ms){}void removeCallbacks(Runnable r){}
+  long clock;Map<Runnable,Long> callbacks=new HashMap<>();
+  void postDelayed(Runnable r,long ms){callbacks.put(r,clock+ms);}void removeCallbacks(Runnable r){callbacks.remove(r);}
+  void advance(long ms){clock+=ms;for(Runnable r:new ArrayList<>(callbacks.keySet()))if(callbacks.get(r)<=clock){callbacks.remove(r);r.run();}}
   protected void onDraw(Canvas c){}protected void onDetachedFromWindow(){}
   protected void onSizeChanged(int w,int h,int oldw,int oldh){}
   protected void onVisibilityChanged(View v,int visibility){}
@@ -52,11 +54,11 @@ public class DrivingControlsProbe {
  static class DashPathEffect {DashPathEffect(float[] intervals,float phase){}}
  static class Paint {
   static final int ANTI_ALIAS_FLAG=1;enum Style{FILL,STROKE}enum Align{CENTER}
-  static class FontMetrics{float ascent=-8,descent=2;}float size;DashPathEffect effect;
+  static class FontMetrics{float ascent=-8,descent=2;}float size;int color,alpha;DashPathEffect effect;
   void setPathEffect(DashPathEffect e){effect=e;}
-  Paint(int f){}void setStyle(Style s){}void setStrokeWidth(float s){}void setColor(int c){}
+  Paint(int f){}void setStyle(Style s){}void setStrokeWidth(float s){}void setColor(int c){color=c;}
   void setTextAlign(Align a){}void setTypeface(Typeface t){}void setTextSize(float s){size=s;}
-  float measureText(String s){return s.length()*size*.5f;}void setAlpha(int a){}
+  float measureText(String s){return s.length()*size*.5f;}void setAlpha(int a){alpha=a;}
   void getFontMetrics(FontMetrics m){}
  }
  static class RectF {
@@ -65,15 +67,17 @@ public class DrivingControlsProbe {
   float centerX(){return (left+right)/2;}float centerY(){return (top+bottom)/2;}
   boolean contains(float x,float y){return x>=left&&x<right&&y>=top&&y<bottom;}
   void inset(float x,float y){left+=x;right-=x;top+=y;bottom-=y;}
+  boolean intersect(float l,float t,float r,float b){set(Math.max(left,l),Math.max(top,t),Math.min(right,r),Math.min(bottom,b));return width()>0&&height()>0;}
  }
  static class Path {void reset(){}void moveTo(float x,float y){}void lineTo(float x,float y){}void close(){}void quadTo(float a,float b,float c,float d){}}
  static class Canvas {
-  RectF hint;String hintText;float hintTextX,hintTextSize;
+  RectF hint;String hintText,autoText;float hintTextX,hintTextSize;int autoColor,autoAlpha;
   float firstScaleX,firstScaleY;int draws;int save(){return 1;}void restoreToCount(int n){}void translate(float x,float y){}
   void scale(float x,float y){if(firstScaleX==0){firstScaleX=x;firstScaleY=y;}}
+  void rotate(float degrees,float x,float y){}
   void drawColor(int c){++draws;}void drawRect(RectF r,Paint p){++draws;}void drawRect(float a,float b,float c,float d,Paint p){++draws;}
   void drawRoundRect(RectF r,float x,float y,Paint p){++draws;if(p.effect!=null){hint=new RectF();hint.set(r);}}void drawRoundRect(float a,float b,float c,float d,float x,float y,Paint p){++draws;}
-  void drawText(String s,float x,float y,Paint p){++draws;if(s.equals("PAUSE")||s.equals("ПАУЗА")){hintText=s;hintTextX=x;hintTextSize=p.size;}}void drawCircle(float x,float y,float r,Paint p){++draws;}
+  void drawText(String s,float x,float y,Paint p){++draws;if(s.equals("PAUSE")||s.equals("ПАУЗА")){hintText=s;hintTextX=x;hintTextSize=p.size;}if(s.equals("AUTO")||s.equals("АВТО")){autoText=s;autoColor=p.color;autoAlpha=p.alpha;}}void drawCircle(float x,float y,float r,Paint p){++draws;}
   void drawPath(Path p,Paint q){++draws;}void drawLine(float a,float b,float c,float d,Paint p){++draws;}
   void drawArc(float a,float b,float c,float d,float e,float f,boolean g,Paint p){++draws;}
  }
@@ -102,32 +106,39 @@ public class DrivingControlsProbe {
   void transform(Matrix m){for(int i=0;i<xs.length;i++){xs[i]*=m.sx;ys[i]*=m.sy;}}void recycle(){}
  }
  static class GameActivity extends Context {
+  int turnSensitivity=10;
+  DrivingControls controls;void changeSteeringMode(int delta){controls.setSteeringMode(Math.floorMod(controls.steeringMode+delta,DrivingControls.STEERING_COUNT));}
+  String steeringName(){return "Two buttons";}
   boolean russian;int pauseCount,hudTap;static int hudHit,weaponMask;static float[] weaponAnchors;
   static int nativeHudHit(float x,float y){return hudHit;}
   static void nativeWeaponHud(int m,float[] a){weaponMask=m;weaponAnchors=a;}
   void onHudTap(int region){hudTap=region;}
   static int buttons,controllerResets;static float lx,rt,lt;static Set<Integer> keys=new HashSet<>();
+  static void nativeSteeringDigital(boolean value){}
   static void nativeController(int b,float x,float y,float rx,float ry,float l,float r){buttons=b;lx=x;lt=l;rt=r;}
   static void nativeHorizon(float v){}static void nativeDriving(boolean b){if(!b)++controllerResets;}static void nativeGamepad(int m,boolean b){}static void nativeKey(int k,boolean b){if(b)keys.add(k);else keys.remove(k);}
   void onDrivingPause(){++pauseCount;}void openTouchEditor(){}void closeTouchEditor(boolean save){}String tr(String e,String r){return russian?r:e;}
  }
  /* PRODUCTION */
+ static class GamepadInput { /* STEERING */ }
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
- static DrivingControls create(GameActivity a,int w,int h){DrivingControls c=new DrivingControls(a,"");c.W=w;c.H=h;c.onSizeChanged(w,h,0,0);c.setInGame(true);c.setEnabled(true);return c;}
+ static class SystemClock {static long now=100;static long uptimeMillis(){return now;}}
+ static class ViewConfiguration {static int getDoubleTapTimeout(){return 300;}}
+ static DrivingControls create(GameActivity a,int w,int h){DrivingControls c=new DrivingControls(a,"");a.controls=c;c.W=w;c.H=h;c.onSizeChanged(w,h,0,0);c.setInGame(true);c.setEnabled(true);return c;}
  static MotionEvent event(int action,int index,int[] ids,float... xy){return new MotionEvent(action,index,ids,xy);}
  public static void main(String[] args){
   for(float[] dims:new float[][]{{1280,720,2},{2424,1080,3},{2340,1080,2.75f},{2560,1600,2},{1920,1080,1.5f}}){
    GameActivity a=new GameActivity();a.resources.m.density=dims[2];DrivingControls c=create(a,(int)dims[0],(int)dims[1]);
-   for(int layout=0;layout<3;layout++)for(int steering=0;steering<3;steering++){
-    c.setLayout(layout);c.setSteeringMode(steering);
+   for(int steering=0;steering<DrivingControls.STEERING_COUNT;steering++){
+    c.setSteeringMode(steering);
     for(DrivingControls.Control b:c.controls)if(!b.hidden()){
      RectF r=new RectF();b.bounds(r);check(r.left>=-1&&r.top>=-1&&r.right<=c.width+1&&r.bottom<=c.height+1,"default fits "+b.id);
-     if(layout==DrivingControls.DRIVING)check(c.controlAt(r.centerX(),r.centerY())==b,"distinct race centre "+b.id);
+     check(c.controlAt(r.centerX(),r.centerY())==b,"distinct race centre "+b.id);
     }
    }
-   c.setLayout(DrivingControls.DRIVING);c.setSteeringMode(DrivingControls.STEERING_ARROWS);c.beginEdit();
+   c.setSteeringMode(DrivingControls.STEERING_ARROWS);c.beginEdit();
    for(DrivingControls.Control b:c.controls)if(b.id.equals("lb")||b.id.equals("rb"))
-    check(!c.legacyButton.contains(b.cx,b.cy)&&!c.floatingButton.contains(b.cx,b.cy)&&!c.hideSelected.contains(b.cx,b.cy),"editor leaves weapon centres selectable");
+    check(!c.floatingButton.contains(b.cx,b.cy)&&!c.hideSelected.contains(b.cx,b.cy),"editor leaves weapon centres selectable");
    c.endEdit(false);
   }
   GameActivity a=new GameActivity();a.resources.m.density=3;DrivingControls c=create(a,2424,1080);
@@ -153,7 +164,7 @@ public class DrivingControlsProbe {
   for(DrivingControls.Control b:c.controls){if(b.id.equals("start"))pause=b;if(b.id.equals("x"))cam=b;if(b.id.equals("y"))recover=b;if(b.id.equals("look_back"))look=b;}
   check(pause.cx<2424*.1f&&pause.cy<1080*.15f,"pause is top left");
   check(look.cx<recover.cx&&recover.cx<cam.cx&&look.cx>2424*.7f,"utilities are reversed at top right");
-  for(int mode=0;mode<3;++mode){
+  for(int mode=0;mode<DrivingControls.STEERING_COUNT;++mode){
    c.setSteeringMode(mode);
    for(DrivingControls.Control b:c.controls)if(b.id.equals("start"))pause=b;
    c.handleTransformedMotion(event(0,0,new int[]{9},c.rightTrigger.cx,c.rightTrigger.cy));
@@ -182,22 +193,23 @@ public class DrivingControlsProbe {
     RectF bounds=new RectF();edgePause.bounds(bounds);
     float scaleX=(2424-insets[0]-insets[2])/2424f,scaleY=(1080-insets[1]-insets[3])/1080f;
     float halfX=Math.max(edge.dp(24),bounds.width()*.5f+edge.dp(5)),halfY=Math.max(edge.dp(24),bounds.height()*.5f+edge.dp(5));
-    float physicalY=insets[1]+bounds.centerY()*scaleY;
-    float physicalRight=insets[0]+(bounds.centerX()+halfX)*scaleX,physicalBottom=insets[1]+(bounds.centerY()+halfY)*scaleY;
+    float physicalY=bounds.centerY();
+    float physicalLeft=Math.max(0,bounds.centerX()-halfX);
+    float physicalRight=bounds.centerX()+halfX,physicalBottom=bounds.centerY()+halfY;
     for(boolean overlay:new boolean[]{true,false}){
      edge.setEnabled(overlay);
      Canvas racing=new Canvas();edge.onDraw(racing);check(racing.hint==null,"pause outline is hidden during racing");
      edge.setPauseHint(true);Canvas countdown=new Canvas();edge.onDraw(countdown);
      check(countdown.hint!=null&&"PAUSE".equals(countdown.hintText),"countdown shows dashed pause outline even with overlay disabled");
-     check(Math.abs(countdown.hint.left-edge.dp(.5f))<.001f&&Math.abs(countdown.hint.right+edge.dp(.5f)-physicalRight)<.001f,"hint shares the physical pause hit bounds");
+     check(Math.abs(countdown.hint.left-edge.dp(.5f)-physicalLeft)<.001f&&Math.abs(countdown.hint.right+edge.dp(.5f)-physicalRight)<.001f,"hint shares the physical pause hit bounds");
      check(Math.abs(countdown.hint.bottom+edge.dp(.5f)-Math.min(1080,physicalBottom))<.001f,"hint keeps pause height and clips at the screen");
      check(countdown.hintTextX-countdown.hintText.length()*countdown.hintTextSize*.25f>=insets[0],"pause caption stays clear of camera cutout");
      edgePause.userHidden=true;Canvas hiddenPause=new Canvas();edge.onDraw(hiddenPause);check((hiddenPause.hint==null)==overlay,"guide follows pause hit availability in custom layouts");edgePause.userHidden=false;
      edgeActivity.russian=true;Canvas russian=new Canvas();edge.onDraw(russian);check("ПАУЗА".equals(russian.hintText),"pause hint uses game language");edgeActivity.russian=false;
      edge.setPauseHint(false);Canvas started=new Canvas();edge.onDraw(started);check(started.hint==null,"start removes pause outline");
-     for(float physicalX:new float[]{0,1,Math.max(0,insets[0]-1)}){
+     for(float physicalX:new float[]{physicalLeft+1,bounds.centerX()}){
       int pauses=edgeActivity.pauseCount;
-      check(edge.handleMotion(event(0,0,new int[]{37},physicalX,physicalY)),"pause reaches physical left edge through either cutout inset");
+      check(edge.handleMotion(event(0,0,new int[]{37},physicalX,physicalY)),"pause uses unscaled full-display coordinates");
       check(edgeActivity.pauseCount==pauses+1&&GameActivity.buttons==0x10,"extended edge invokes the original pause action once");
       edge.handleMotion(event(1,0,new int[]{37},physicalX,physicalY));
       check(GameActivity.buttons==0&&edge.pointers.size()==0,"extended pause releases its pointer");
@@ -231,8 +243,7 @@ public class DrivingControlsProbe {
    check(GameActivity.buttons==0,"action releases: "+actionIds[i]);
    check(GameActivity.controllerResets==resets,"normal UP retains native short-tap latch: "+actionIds[i]);
   }
-  c.setLayout(DrivingControls.DRAG);check(c.rightStick.hidden(),"original automatic transmission has no donor gear stick");
-  c.setLayout(DrivingControls.LAYOUT_AUTO);
+  check(c.rightStick.hidden(),"original automatic transmission has no donor gear stick");
   c.handleTransformedMotion(event(0,0,new int[]{23},c.leftTrigger.cx,c.leftTrigger.cy));
   check(GameActivity.lt==1&&GameActivity.rt==0,"original brake uses left trigger");
   c.handleTransformedMotion(event(1,0,new int[]{23},c.leftTrigger.cx,c.leftTrigger.cy));
@@ -246,9 +257,9 @@ public class DrivingControlsProbe {
   c.handleTransformedMotion(event(6,1,new int[]{8,17},sx+100,sy,mg.cx,mg.cy));check(GameActivity.rt==0&&GameActivity.buttons==0&&GameActivity.lx>.4f,"releasing pedal keeps steering");
   c.handleTransformedMotion(event(2,0,new int[]{99},0,0));check(GameActivity.lx==0,"missing owner releases");
   c.setSafeInsets(120,12,44,25);sx=c.leftStick.cx;sy=c.leftStick.cy;
-  float px=120+sx*(2424-164)/2424,py=12+sy*(1080-37)/1080;
+  float px=sx,py=sy;
   c.handleMotion(event(0,0,new int[]{8},px,py));check(c.leftStick.inUse,"safe area input hits drawn centre");
-  Canvas canvas=new Canvas();c.onDraw(canvas);check(canvas.firstScaleX<1&&canvas.firstScaleY<1,"safe canvas fits inward");
+  Canvas canvas=new Canvas();c.onDraw(canvas);check(canvas.firstScaleX==1&&canvas.firstScaleY==1,"controls keep full-display drawing coordinates");
   int resets=GameActivity.controllerResets;
   c.handleMotion(event(3,0,new int[]{8},px,py));check(c.pointers.size()==0&&GameActivity.lx==0&&GameActivity.rt==0,"cancel clears all");
   check(GameActivity.controllerResets==resets+1,"cancel clears native pending button edges");
@@ -264,10 +275,9 @@ public class DrivingControlsProbe {
   check(restored.selected==null&&restored.editorPointer==-1,"rebuild clears stale selected control and capture");
   restored.W=2000;restored.H=1000;restored.onSizeChanged(2000,1000,2424,1080);
   check(Math.abs(restored.leftTrigger.cx/2000f-1000f/2424)<.001f&&Math.abs(restored.leftTrigger.cy/1000f-550f/1080)<.001f,"resize keeps draft fractions");
-  restored.setSteeringMode(DrivingControls.STEERING_STICK);restored.setLayout(DrivingControls.LAYOUT_AUTO);
+  restored.setSteeringMode(DrivingControls.STEERING_STICK);
   check(restored.leftTrigger.personalized&&!restored.leftTrigger.userHidden&&restored.leftTrigger.scale==1.2f&&restored.opacity==.6f&&restored.floatingSteering,"resume setters retain complete draft");
-  restored.nextEditedLayout();restored.leftTrigger.moveTo(800,400);restored.leftTrigger.personalized=true;restored.leftTrigger.userHidden=true;
-  restored.setSafeInsets(0,0,0,0);restored.nextEditedLayout();restored.nextEditedLayout();
+  restored.setSafeInsets(0,0,0,0);restored.setSteeringMode(DrivingControls.STEERING_WHEEL);restored.setSteeringMode(DrivingControls.STEERING_STICK);
   check(Math.abs(restored.leftTrigger.cx/2000f-1000f/2424)<.001f&&!restored.leftTrigger.userHidden,"other draft layouts survive rebuild");
   restored.endEdit(false);check(restored.leftTrigger.hidden()&&restored.opacity==.4f&&!restored.floatingSteering,"cancel after lifecycle restores preferences");
   restored.beginEdit();restored.leftTrigger.moveTo(950,500);restored.leftTrigger.personalized=true;restored.leftTrigger.userHidden=false;restored.setSafeInsets(40,0,0,0);restored.endEdit(true);
@@ -333,19 +343,72 @@ public class DrivingControlsProbe {
   c.selected.moveTo(300,700);c.endEdit(true);c=create(dimensionActivity,2424,1080);
   check(c.leftArrow.stretchX==1.2f&&c.leftArrow.stretchY==1.3f&&c.leftArrow.cx==300,"independent dimensions persist");
   c.beginEdit();c.selected=c.leftArrow;c.changeDimension(true,.4f);c.endEdit(false);check(c.leftArrow.stretchX==1.2f,"dimension cancel");
-  c.beginEdit();c.switchStyle();check(c.isLegacyLayout(),"classic preset selected");
-  c.leftArrow.moveTo(420,650);c.leftArrow.personalized=true;c.switchStyle();
-  check(!c.isLegacyLayout()&&c.leftArrow.cx==300&&c.leftArrow.stretchX==1.2f,"preset switch retains new draft");
-  c.W=2000;c.H=1000;c.onSizeChanged(2000,1000,2424,1080);c.switchStyle();
-  check(Math.abs(c.leftArrow.cx-420*2000f/2424)<.01f,"other preset draft survives resize");c.switchStyle();c.endEdit(true);
-  dimensionActivity.prefs.edit().putBoolean("legacyLayout",true).apply();c=create(dimensionActivity,2000,1000);
-  check(Math.abs(c.leftArrow.cx-420*2000f/2424)<.01f,"both preset drafts save independently");
-  c.beginEdit();c.switchStyle();c.endEdit(false);check(c.isLegacyLayout(),"cancel restores chosen preset");
+  c.beginEdit();c.setSafeInsets(120,0,0,0);c.leftArrow.moveTo(75,650);c.leftArrow.personalized=true;c.endEdit(true);
+  c=create(dimensionActivity,2424,1080);c.setSafeInsets(120,0,0,0);
+  check(c.leftArrow.cx==75,"saved control remains in the cutout strip");
+  c.handleMotion(event(0,0,new int[]{4},75,650));check(GameActivity.lx==-1,"cutout strip receives unscaled input");c.release();
+  c.beginEdit();c.setSteeringMode(DrivingControls.STEERING_WHEEL);c.endEdit(false);
+  check(c.steeringMode==DrivingControls.STEERING_ARROWS,"cancel restores steering mode");
+  c.setSteeringMode(DrivingControls.STEERING_WHEEL);DrivingControls.Wheel wheel=c.steeringWheel;
+  wheel.press(wheel.cx+wheel.radius,wheel.cy);wheel.move(wheel.cx,wheel.cy+wheel.radius);c.sendState();
+  check(Math.abs(GameActivity.lx-2f/3)<.001f,"quarter-turn wheel maps continuously to steering");
+  wheel.move(wheel.cx-wheel.radius,wheel.cy);c.sendState();check(GameActivity.lx==1,"wheel clamps to full lock");
+  wheel.release();c.sendState();check(GameActivity.lx==0,"wheel release centres steering");
+  wheel.press(wheel.cx-wheel.radius,wheel.cy+1);wheel.move(wheel.cx-wheel.radius,wheel.cy-1);
+  check(Math.abs(wheel.value)<.02f,"wheel unwraps across 180 degrees");c.release();
+  c.setSteeringMode(DrivingControls.STEERING_ARROWS);c.setMinigunCruise(true);
+  DrivingControls.Minigun minigun=(DrivingControls.Minigun)c.controls.stream().filter(b->b.id.equals("rb")).findFirst().get();
+  minigun.press(minigun.cx,minigun.cy);minigun.up();SystemClock.now+=100;minigun.press(minigun.cx,minigun.cy);minigun.up();c.sendState();
+  check(c.minigunLatched&&GameActivity.buttons==0x200,"double tap latches minigun after release");
+  Canvas autoCanvas=new Canvas();c.onDraw(autoCanvas);
+  check("AUTO".equals(autoCanvas.autoText)&&autoCanvas.autoColor==DrivingControls.CRUISE_COLOR&&autoCanvas.autoAlpha==255,"latched cruise has an opaque distinct AUTO indicator");
+  check(c.description.contains("Minigun cruise active"),"cruise state is accessible");
+  ((GameActivity)c.getContext()).russian=true;autoCanvas=new Canvas();c.onDraw(autoCanvas);
+  check("АВТО".equals(autoCanvas.autoText),"cruise indicator follows the UI language");((GameActivity)c.getContext()).russian=false;
+  c.handleTransformedMotion(event(0,0,new int[]{19},minigun.cx,minigun.cy));
+  check(!c.minigunLatched&&GameActivity.buttons==0,"cancel on DOWN stops firing before release or any timer");
+  check(!c.description.contains("Minigun cruise active"),"accessible cruise state clears immediately");
+  c.advance(1000);check(!c.minigunLatched&&GameActivity.buttons==0,"held cancel gesture cannot reactivate cruise");
+  autoCanvas=new Canvas();c.onDraw(autoCanvas);check(autoCanvas.autoText==null,"cancel removes AUTO on the next draw");
+  c.handleTransformedMotion(event(1,0,new int[]{19},minigun.cx,minigun.cy));
+  minigun.press(minigun.cx,minigun.cy);c.sendState();check(GameActivity.buttons==0x200,"fresh manual press still fires");
+  autoCanvas=new Canvas();c.onDraw(autoCanvas);check(autoCanvas.autoText==null,"manual fire has no cruise indicator");
+  minigun.up();c.sendState();
+  c.rightTrigger.press(c.rightTrigger.cx,c.rightTrigger.cy);c.rightTrigger.move(minigun.cx,minigun.cy);c.sendState();
+  check(!c.minigunLatched&&GameActivity.rt==1&&GameActivity.buttons==0x200,"gas swipe fires immediately without latching");
+  c.advance(299);check(!c.minigunLatched,"cruise waits the full 300 ms");
+  c.advance(1);
+  check(c.minigunLatched&&GameActivity.rt==1,"gas swipe latches minigun and keeps gas");
+  c.rightTrigger.move(minigun.cx+1,minigun.cy);check(c.minigunLatched,"moves within minigun do not toggle again");
+  c.rightTrigger.move(c.rightTrigger.cx,c.rightTrigger.cy);c.rightTrigger.release();c.sendState();
+  check(GameActivity.buttons==0x200&&GameActivity.rt==0,"swipe latch survives gas release");
+  c.rightTrigger.press(c.rightTrigger.cx,c.rightTrigger.cy);c.rightTrigger.move(minigun.cx,minigun.cy);c.sendState();
+  check(!c.minigunLatched&&GameActivity.buttons==0&&GameActivity.rt==1&&c.callbacks.isEmpty(),"gas swipe cancels cruise and firing immediately, retaining gas");
+  c.rightTrigger.move(minigun.cx+1,minigun.cy);c.advance(1000);c.sendState();
+  check(!c.minigunLatched&&GameActivity.buttons==0,"remaining over minigun after cancel never restarts firing or a timer");
+  c.rightTrigger.move(c.rightTrigger.cx,c.rightTrigger.cy);c.rightTrigger.move(minigun.cx,minigun.cy);c.sendState();
+  check(GameActivity.buttons==0x200&&!c.minigunLatched,"new entry starts manual fire after cancel");
+  c.advance(299);check(!c.minigunLatched,"new activation still waits 300 ms");c.advance(1);check(c.minigunLatched,"new entry can latch again");
+  c.release();check(!c.minigunLatched&&GameActivity.buttons==0,"lifecycle cancel releases latched minigun");
+  c.handleTransformedMotion(event(0,0,new int[]{11},c.rightTrigger.cx,c.rightTrigger.cy));
+  c.handleTransformedMotion(event(2,0,new int[]{11},minigun.cx,minigun.cy));c.advance(300);
+  c.handleTransformedMotion(event(5,1,new int[]{11,22},minigun.cx,minigun.cy,minigun.cx,minigun.cy));
+  check(!c.minigunLatched&&GameActivity.buttons==0&&GameActivity.rt==1,"second finger cancels both cruise and the held gas-slide fire");
+  c.handleTransformedMotion(event(6,1,new int[]{11,22},minigun.cx,minigun.cy,minigun.cx,minigun.cy));
+  c.handleTransformedMotion(event(2,0,new int[]{11},minigun.cx+1,minigun.cy));c.advance(1000);
+  check(GameActivity.buttons==0&&!c.minigunLatched,"held gas finger stays suppressed after the cancelling finger releases");c.release();
+  c.rightTrigger.press(c.rightTrigger.cx,c.rightTrigger.cy);c.rightTrigger.move(minigun.cx,minigun.cy);c.advance(200);
+  c.rightTrigger.move(c.rightTrigger.cx,c.rightTrigger.cy);c.advance(200);check(!c.minigunLatched,"leaving minigun cancels pending latch");
+  c.rightTrigger.move(minigun.cx,minigun.cy);c.advance(200);c.release();c.advance(100);
+  check(!c.minigunLatched&&c.callbacks.isEmpty(),"release cancels the delayed latch");
+  c.setSteeringMode(DrivingControls.STEERING_WHEEL);wheel=c.steeringWheel;
+  ((GameActivity)c.getContext()).turnSensitivity=5;wheel.value=.8f;c.sendState();check(Math.abs(GameActivity.lx-.4f)<.0001f,"wheel shares sensitivity");
+  c.setSteeringMode(DrivingControls.STEERING_STICK);c.leftStick.xValue=.8f;c.sendState();check(Math.abs(GameActivity.lx-.4f)<.0001f,"virtual stick shares sensitivity");
   c=create(new GameActivity(),2424,1080);c.setHardwareInput(true);
   GameActivity.buttons=0x1000;GameActivity.rt=.75f;c.sendState();c.setWeaponsEnabled(0);c.release();
   check(GameActivity.buttons==0x1000&&GameActivity.rt==.75f&&c.isEnabled(),"visible touch controls preserve active physical input");
   c.setHardwareInput(false);check(GameActivity.buttons==0&&GameActivity.rt==0&&c.isEnabled(),"touch takes ownership without changing visibility preference");
-  System.out.println("PASS production controls: 45 layouts, arrow transfer/outside/owners, utility positions, safe area, gas/fire, cancel, editor, localization and physical input ownership");
+  System.out.println("PASS production controls: 45 layouts, arrows/owners, utility positions, safe area, gas/fire, AUTO indicator/accessibility, 300 ms activation, immediate tap/swipe/multitouch cancellation, editor, localization and physical input ownership");
  }
 }
 '''
@@ -356,10 +419,13 @@ class DrivingControlsTest(unittest.TestCase):
         source = Path(os.environ.get("CRASHDAY_CONTROLS_SOURCE", ROOT / "android/app/src/org/crashday/port/DrivingControls.java")).read_text(encoding="utf-8")
         source = re.sub(r"(?m)^(?:package|import) .*;\s*", "", source)
         source = source.replace("final class DrivingControls extends", "static final class DrivingControls extends", 1)
-        source = source.replace("android.graphics.", "")
+        for namespace in ("android.graphics.", "android.os.", "android.view."):
+            source = source.replace(namespace, "")
         OUT.mkdir(parents=True, exist_ok=True)
         probe = OUT / "DrivingControlsProbe.java"
-        probe.write_text(HARNESS.replace("/* PRODUCTION */", source), encoding="utf-8")
+        from test_menu_gestures import method
+        pad = (ROOT / "android/app/src/org/crashday/port/GamepadInput.java").read_text(encoding="utf-8")
+        probe.write_text(HARNESS.replace("/* PRODUCTION */", source).replace("/* STEERING */", method(pad, "static float steering(")), encoding="utf-8")
         java = Path("C:/Portable/jdk-24.0.1/bin")
         for command in ([java / "javac.exe", "-encoding", "UTF-8", "-d", OUT, probe],
                         [java / "java.exe", "-cp", OUT, "DrivingControlsProbe"]):

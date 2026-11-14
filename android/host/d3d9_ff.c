@@ -22,7 +22,7 @@ typedef struct {
     uint32_t tc_set[8], tc_mode[8], tc_flags[8];   /* per output coordinate: TEXCOORDINDEX and transform flags */
     uint32_t lighting, lights, diffuse_from_vertex;
     uint32_t outputs[16];             /* varyings written: usage << 8 | index */
-    uint32_t output_count;
+    uint32_t output_count, temporal;
 } ff_vkey;
 
 /* Pixel half. */
@@ -33,6 +33,7 @@ typedef struct {
     uint32_t stage_count;
     uint32_t specular;
     uint32_t available;               /* varyings provided: bit 0 diffuse, 1 specular, 2 + n texcoord n */
+    uint32_t temporal;
 } ff_fkey;
 
 typedef struct ff_vs { ff_vkey key; GLuint gl; uint32_t id; struct ff_vs *next; } ff_vs;
@@ -40,8 +41,9 @@ typedef struct ff_fs { ff_fkey key; GLuint gl; uint32_t id; struct ff_fs *next; 
 typedef struct ff_prog { uint32_t vid, fid; GLuint gl; struct ff_prog *next; } ff_prog;
 typedef struct ff_locs {
     GLuint program;
-    GLint wvp, world_view, vp, half, roll, ui_scale, material, ambient, light_dir, light_diffuse, tex_matrix;
+    GLint wvp, world_view, vp, half, roll, material, ambient, light_dir, light_diffuse, tex_matrix;
     GLint tfactor, alpha_func, alpha_ref;
+    GLint previous, previous_roll, jitter, resolution, reactive;
     struct ff_locs *next;
 } ff_locs;
 
@@ -50,6 +52,7 @@ static ff_fs *fs_cache;
 static ff_prog *prog_cache;
 static ff_locs *locs_table[64];
 static uint32_t next_id = 1;
+static void motion_reset(void);
 
 void d3d_ff_forget_program(GLuint program)
 {
@@ -79,6 +82,7 @@ void d3d_ff_reset(void)
         while (locs_table[i]) { ff_locs *p = locs_table[i]; locs_table[i] = p->next; free(p); }
     }
     next_id = 1;
+    motion_reset();
 }
 
 #define APPEND(buf, n, ...) ((n) += (size_t)snprintf((buf) + (n), sizeof(buf) - (n), __VA_ARGS__))
@@ -109,6 +113,8 @@ static void mul(const float *a, const float *b, float *r)
         r[i * 4 + j] = s;
     }
 }
+
+#include "d3d9_motion.inc"
 
 static uint32_t decl_dims(uint8_t type)
 {
@@ -241,7 +247,7 @@ static GLuint vertex_shader(const ff_vkey *k)
     char src[16384];
     size_t n = 0;
     APPEND(src, n, "#version 310 es\nprecision highp float;\n"
-        "uniform mat4 ff_wvp;\nuniform mat4 ff_world_view;\nuniform vec4 ff_vp;\nuniform vec2 ff_half;\nuniform vec2 ff_roll;\nuniform vec2 ff_ui_scale;\n"
+        "uniform mat4 ff_wvp;\nuniform mat4 ff_world_view;\nuniform vec4 ff_vp;\nuniform vec2 ff_half;\nuniform vec2 ff_roll;\n"
         "uniform vec4 ff_material[4];\nuniform vec4 ff_ambient;\nuniform vec4 ff_light_dir[8];\n"
         "uniform vec4 ff_light_diffuse[8];\nuniform mat4 ff_tex_matrix[8];\n"
         "layout(location = 0) in vec4 ff_a_pos;\n");
@@ -252,6 +258,7 @@ static GLuint vertex_shader(const ff_vkey *k)
         if (k->tex_dims[i]) APPEND(src, n, "layout(location = %u) in vec4 ff_a_tex%u;\n", 4 + i, i);
     for (uint32_t i = 0; i < k->output_count; ++i)
         APPEND(src, n, "out highp vec4 io_%u_%u;\n", k->outputs[i] >> 8, k->outputs[i] & 0xFF);
+    if (k->temporal) APPEND(src, n, "uniform mat4 ff_previous;uniform vec2 ff_previous_roll,ff_jitter;out highp vec4 ff_current_clip,ff_previous_clip;\n");
     APPEND(src, n, "void main() {\n");
     int camera = 0;
     for (uint32_t i = 0; i < k->output_count; ++i) {
@@ -259,12 +266,11 @@ static GLuint vertex_shader(const ff_vkey *k)
         if (o >> 8 == 5 && (o & 0xFF) < 8 && k->tc_mode[o & 0xFF] != TCI_PASSTHRU) camera = 1;
     }
     if (k->inputs & IN_POST) {
-        /* Pre-transformed: screen pixels, D3D depth and 1/w. */
+        /* POSITIONT uses D3D viewport pixels even in a smaller scene target. */
         APPEND(src, n,
             "\tfloat w = ff_a_pos.w != 0.0 ? 1.0 / ff_a_pos.w : 1.0;\n"
             "\tgl_Position = vec4((ff_a_pos.x - ff_vp.x) / ff_vp.z * 2.0 - 1.0,\n"
-            "\t                   1.0 - (ff_a_pos.y - ff_vp.y) / ff_vp.w * 2.0, ff_a_pos.z, 1.0) * w;\n"
-            "\tgl_Position.xy *= ff_ui_scale;\n");
+            "\t                   1.0 - (ff_a_pos.y - ff_vp.y) / ff_vp.w * 2.0, ff_a_pos.z, 1.0) * w;\n");
     } else {
         /* D3D row vectors: the matrices are uploaded row-major untransposed, so M * v here is v * M there. */
         APPEND(src, n, "\tgl_Position = ff_wvp * vec4(ff_a_pos.xyz, 1.0);\n");
@@ -280,6 +286,13 @@ static GLuint vertex_shader(const ff_vkey *k)
         "\tgl_Position.z = gl_Position.z * 2.0 - gl_Position.w;\n");
     if (!(k->inputs & IN_POST))
         APPEND(src, n, "\tgl_Position.xy = mat2(ff_roll.x, ff_roll.y, -ff_roll.y, ff_roll.x) * gl_Position.xy;\n");
+    if (k->temporal) {
+        APPEND(src, n, "ff_current_clip=gl_Position;\n");
+        if (k->inputs & IN_POST) APPEND(src, n, "ff_previous_clip=gl_Position;\n");
+        else APPEND(src, n, "ff_previous_clip=ff_previous*vec4(ff_a_pos.xyz,1.);ff_previous_clip.y=-ff_previous_clip.y;"
+            "ff_previous_clip.xy=mat2(ff_previous_roll.x,ff_previous_roll.y,-ff_previous_roll.y,ff_previous_roll.x)*ff_previous_clip.xy;\n");
+        APPEND(src, n, "gl_Position.xy+=ff_jitter*gl_Position.w;\n");
+    }
     APPEND(src, n, "\tgl_Position.xy += ff_half * gl_Position.w;\n");
     const char *diffuse_in = (k->inputs & IN_DIFFUSE) ? ((k->bgra & 1) ? "ff_a_diffuse.bgra" : "ff_a_diffuse") : "vec4(1.0)";
     const char *specular_in = (k->inputs & IN_SPECULAR) ? ((k->bgra & 2) ? "ff_a_specular.bgra" : "ff_a_specular") : "vec4(0.0)";
@@ -438,6 +451,10 @@ static GLuint pixel_shader(const ff_fkey *k)
         "precision highp samplerCube;\nprecision highp sampler3D;\n"
         "uniform vec4 ff_tfactor;\nuniform int vpAlphaFunc;\nuniform float vpAlphaRef;\n"
         "layout(location = 0) out highp vec4 ff_color;\n");
+    if (k->temporal) {
+        APPEND(src, n, "layout(location=1)out highp vec4 ff_motion;layout(location=2)out highp vec4 ff_reactive_mask;uniform float ff_reactive;uniform vec2 ff_resolution;\n");
+        if (k->temporal == 1) APPEND(src, n, "in highp vec4 ff_current_clip,ff_previous_clip;\n");
+    }
     if (k->available & 1) APPEND(src, n, "in highp vec4 io_10_0;\n");
     if (k->available & 2) APPEND(src, n, "in highp vec4 io_10_1;\n");
     for (uint32_t s = 0; s < k->stage_count; ++s) {
@@ -475,7 +492,10 @@ static GLuint pixel_shader(const ff_fkey *k)
         "\telse if (vpAlphaFunc == 3) pass = a == vpAlphaRef; else if (vpAlphaFunc == 4) pass = a <= vpAlphaRef;\n"
         "\telse if (vpAlphaFunc == 5) pass = a > vpAlphaRef; else if (vpAlphaFunc == 6) pass = a != vpAlphaRef;\n"
         "\telse if (vpAlphaFunc == 7) pass = a >= vpAlphaRef;\n"
-        "\tif (!pass) discard;\n\tff_color = current;\n}\n");
+        "\tif (!pass) discard;\n\tff_color = current;\n");
+    if (k->temporal == 1) APPEND(src, n, "ff_motion=vec4((ff_previous_clip.xy/max(ff_previous_clip.w,.0001)-ff_current_clip.xy/max(ff_current_clip.w,.0001))*.5*ff_resolution,0.,1.);ff_reactive_mask=vec4(ff_reactive,0.,0.,1.);\n");
+    else if (k->temporal) APPEND(src, n, "ff_motion=vec4(0.,0.,0.,1.);ff_reactive_mask=vec4(1.,0.,0.,1.);\n");
+    APPEND(src, n, "}\n");
     return compile_ff(GL_FRAGMENT_SHADER, src);
 }
 
@@ -504,11 +524,15 @@ static ff_locs *locations(GLuint program)
     ff_locs *l = (ff_locs *)calloc(1, sizeof *l);
     l->program = program;
     l->wvp = glGetUniformLocation(program, "ff_wvp");
+    l->previous = glGetUniformLocation(program, "ff_previous");
+    l->previous_roll = glGetUniformLocation(program, "ff_previous_roll");
+    l->jitter = glGetUniformLocation(program, "ff_jitter");
+    l->resolution = glGetUniformLocation(program, "ff_resolution");
+    l->reactive = glGetUniformLocation(program, "ff_reactive");
     l->world_view = glGetUniformLocation(program, "ff_world_view");
     l->vp = glGetUniformLocation(program, "ff_vp");
     l->half = glGetUniformLocation(program, "ff_half");
     l->roll = glGetUniformLocation(program, "ff_roll");
-    l->ui_scale = glGetUniformLocation(program, "ff_ui_scale");
     l->material = glGetUniformLocation(program, "ff_material");
     l->ambient = glGetUniformLocation(program, "ff_ambient");
     l->light_dir = glGetUniformLocation(program, "ff_light_dir");
@@ -530,6 +554,19 @@ static ff_locs *locations(GLuint program)
 
 static void vertex_uniforms(d3d_device *d, const ff_locs *l)
 {
+    if (l->jitter >= 0) {
+        float jitter[2], resolution[2], previous[16] = {0}, roll[2] = {1, 0}; int scene;
+        d3d_gl_temporal_parameters(d, jitter, resolution, &scene);
+        float reactive = scene ? motion_previous(d, previous, roll) : 1;
+        if (d->st.rs[27] || !d->st.rs[14] || !d->st.decl) reactive = 1;
+        d3d_decl *decl = d->st.decl;
+        for (int i = 0; decl && i < decl->count; ++i) if (decl->elements[i].usage == 9) reactive = 1;
+        glUniform2fv(l->jitter, 1, jitter);
+        if (l->previous >= 0) glUniformMatrix4fv(l->previous, 1, GL_FALSE, previous);
+        if (l->previous_roll >= 0) glUniform2fv(l->previous_roll, 1, roll);
+        if (l->resolution >= 0) glUniform2fv(l->resolution, 1, resolution);
+        if (l->reactive >= 0) glUniform1f(l->reactive, reactive);
+    }
     if (l->wvp >= 0 || l->world_view >= 0) {
         float world_view[16], wvp[16];
         mul(d->st.transforms[256], d->st.transforms[2], world_view);   /* WORLD * VIEW */
@@ -541,9 +578,9 @@ static void vertex_uniforms(d3d_device *d, const ff_locs *l)
         d->st.viewport[2] ? (float)d->st.viewport[2] : 1.0f, d->st.viewport[3] ? (float)d->st.viewport[3] : 1.0f);
     float ui_scale[2];
     d3d_gl_ui_scale(ui_scale);
-    if (l->ui_scale >= 0) glUniform2f(l->ui_scale, ui_scale[0], ui_scale[1]);
-    if (l->half >= 0) glUniform2f(l->half, d->st.viewport[2] ? 1.0f / (d->st.viewport[2] * ui_scale[0]) : 0.0f,
-        d->st.viewport[3] ? 1.0f / (d->st.viewport[3] * ui_scale[1]) : 0.0f);
+    /* The half-pixel offset follows the physical target, unlike POSITIONT coordinates. */
+    if (l->half >= 0) glUniform2f(l->half, d->st.viewport[2] ? ui_scale[0] / d->st.viewport[2] : 0.0f,
+        d->st.viewport[3] ? ui_scale[1] / d->st.viewport[3] : 0.0f);
     extern void void_input_horizon(float *, float *);
     float cosine, sine;
     void_input_horizon(&cosine, &sine);
@@ -611,6 +648,7 @@ int d3d_ff_bind(d3d_device *d, int *attr_count, int *usage, int *index, uint32_t
     ff_vkey vk;
     if (!vertex_key(d, &vk, outputs, count)) return 0;
     pixel_key(d, &fk, available, 0);
+    vk.temporal = fk.temporal = d3d_gl_temporal_enabled() ? 1 : 0;
     ff_vs *v = vertex_half(&vk);
     ff_fs *f = v ? pixel_half(&fk) : NULL;
     if (!f) return 0;
@@ -655,6 +693,7 @@ GLuint d3d_ff_vertex_stage(d3d_device *d, const char *ps_source, uint32_t *id)
     ff_vkey vk;
     *id = 0;
     if (!vertex_key(d, &vk, outputs, count)) return 0;
+    vk.temporal = d3d_gl_temporal_enabled() ? 1 : 0;
     ff_vs *v = vertex_half(&vk);
     if (!v) return 0;
     *id = v->id;
@@ -673,6 +712,7 @@ GLuint d3d_ff_pixel_stage(d3d_device *d, const char *vs_source, uint32_t *id, ui
     }
     ff_fkey fk;
     pixel_key(d, &fk, available, 1);
+    fk.temporal = d3d_gl_temporal_enabled() ? 2 : 0;
     ff_fs *f = pixel_half(&fk);
     *id = 0;
     if (!f) return 0;

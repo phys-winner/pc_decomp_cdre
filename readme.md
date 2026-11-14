@@ -5,7 +5,7 @@ static recompilation of the original 32-bit Windows program and its runtime
 dependencies. The translated code runs natively on ARM64; the port supplies the
 Windows interfaces, Direct3D 9 renderer, audio, storage and Android integration.
 
-**Port version: `0.2-dev` · Android package: `org.crashday.port` · version code: `5`.**
+**Port version: `0.3-dev` · Android package: `org.crashday.port` · version code: `6`.**
 
 Project: [phys-winner/pc_decomp_cdre](https://github.com/phys-winner/pc_decomp_cdre).
 APK releases belong on the project's
@@ -39,14 +39,17 @@ not needed on the phone.
 
 ## Requirements and installation
 
-- Android 11 or later, with an ARM64 CPU and `arm64-v8a` support.
+- Android 8.0 (API 26) or later, with an ARM64 CPU and `arm64-v8a` support.
 - OpenGL ES 3.2. The supported renderer is the port's native OpenGL ES backend.
 - The compatible PC game's `data/` and `user/` directories.
 - Space for the APK, approximately 531 MiB of original game files, saves and
   additional texture-conversion output. Conversion needs temporary free space.
 
-1. Install the APK. This build uses version code `5` and can update public `0.1-dev`
-   (code `1`), `0.1.1-dev` (code `4`) and earlier local builds (codes `2` or `3`).
+The API 26 minimum applies to `0.3-dev` and later builds from this source tree.
+The existing public `0.2-dev` APK retains its original Android 11/API 30 minimum.
+
+1. Install the APK. This build uses version code `6` and can update public `0.1-dev`
+   (code `1`), `0.1.1-dev` (code `4`), `0.2-dev` (code `5`) and earlier local builds (codes `2` or `3`).
    Updates must retain the signing certificate to preserve the installed app's data.
 2. Open Crashday. If game files are missing, press **Import from a ZIP…** on the
    main game card, select the archive, review the destination and free space,
@@ -91,26 +94,66 @@ back to English when no matching bank exists.
 ## Controls and settings
 
 Original menus support touch selection, scrolling, text entry and the Android
-keyboard. Driving controls support simultaneous fingers and manual pedals.
+keyboard. Swipe horizontally across the car preview to change cars, or tap the
+arrows' enlarged touch areas. Tap the bottom-right corner to leave credits.
+Driving controls support simultaneous fingers and manual pedals.
 
-- Choose steering arrows, an analog stick or tilt steering in **Options →
+- Choose steering arrows, an analog stick, a steering wheel or tilt steering in **Options →
   Additional settings**. Tilt steering requires a suitable sensor.
+- Steering sensitivity applies to the touch wheel, virtual stick and physical
+  left stick together, from 10% to 200%; 100% preserves the previous response.
+  Tilt sensitivity has its own setting.
 - Hold the pedals to accelerate or brake. Sliding from the accelerator to a
   weapon or nitro keeps acceleration held.
 - Tap the tachometer to recover the car. Tap the radar to change camera; hold it
-  for about half a second to look back.
+  for 120 ms to look back. The separate look-back button responds on press.
 - Tap the upper-left pause region during a race. Its dashed guide appears during
   the pre-race countdown and disappears when racing starts.
-- Edit button positions, width, height and transparency. Classic and new layouts
-  keep their own settings; the on-screen controls can be hidden.
+- Edit button positions, width, height and transparency across the full display,
+  including the strip beside a camera cutout. The modern layout is always used;
+  the on-screen controls can be hidden.
+- Optional minigun cruise control latches fire on a double tap or a slide from
+  the accelerator followed by a 300 ms hold over the minigun. Leaving the button
+  or releasing the accelerator before the delay cancels the pending latch.
+  An AUTO badge and gold border show when cruise is active. Pressing the minigun
+  or sliding back onto it cancels immediately, suppressing fire from that gesture
+  until release or leaving the button;
+  pause and lifecycle cancellation release it too.
+- **Controls → Advanced Controller Settings** restores the original scrollable
+  sensitivity, deadzone, saturation, multiplier and force-feedback controls.
+  Controller and device vibration have independent switches, also available in
+  Additional settings. Tap their rows or use LB/RB on the controller page.
+  The port forwards the game's XInput motor commands to Android; physical
+  vibration requires the OS to expose a supported vibrator.
 - Track editing has touch placement, pan/zoom and keyboard naming. Replay controls
   include playback commands and free-flight camera movement when that mode is active.
 
-Additional settings include an FPS limit, UI scale and 3D rendering scale.
+Additional settings include UI scale, 3D scale from 25% to 200%, optional instant digital steering and
+original/corrected world proportions. Instant steering defaults off and affects
+only the local player's arrows, leaving analog steering unchanged. The original
+camera makes world geometry 17/15 as wide; the correction restores equal pixel
+scales without stretching the HUD. Corrected proportions are the default;
+an explicitly saved choice of original proportions is retained. Boolean options
+in Additional settings use On/Off labels. Its menu entry uses the game's original font.
 Graphics settings expose the display refresh rates and MSAA sample counts
-supported by the device. Refresh rate and FPS limit are independent. Lowering the
+supported by the device; the FPS limit stays in Graphics. Refresh rate and FPS limit are independent. Lowering the
 3D scale preserves the full-resolution race HUD. Controls are released when the
 app loses focus; returning through the launcher resumes a running game process.
+
+Above 100%, 3D scale uses supersampling and bypasses FSR while retaining its saved
+choice; at 200%, the 3D scene has four times as many pixels. Changing scale requires
+a restart and leaves the UI at full display resolution.
+
+Upscaling is off by default and sits beside 3D scale. **FSR 1 + MSAA** applies
+geometry antialiasing before AMD's EASU/RCAS spatial reconstruction. **FSR 3.1**
+uses the pinned AMD 3.1.4 temporal upscaler in races/replays with depth, camera jitter, rigid-object
+motion and reactive masks, without frame generation. Both preserve the
+full-resolution UI and require a restart. FSR 3.1 requires GLES 3.2 and sufficient
+compute/image limits; unsupported initialization is reported in settings and
+falls back to ordinary scaling. Its FP32 GLES path is expensive on older GPUs.
+Programmable animated surfaces reject temporal history until previous vertex
+positions are available, avoiding reuse of incorrect motion. Menu previews and
+loading screens bypass temporal reconstruction and jitter.
 
 ## Steam Workshop mods
 
@@ -121,6 +164,8 @@ Steam page. The API badge checks Steam's metadata service separately from the
 catalogue; tap it to check again.
 
 **Downloads** shows the persistent queue, progress, cancellation, errors and retry.
+Starting an installation keeps the current tab and animates Downloads; each tab
+retains its own scroll position. The launcher shows enabled/downloaded mod counts.
 Downloads continue through the launcher's foreground work service. Reopening the
 Workshop resumes queued work after an interrupted process. Files are streamed,
 checked against their expected sizes and validated before installation; a failed
@@ -132,6 +177,8 @@ retains the original game's loading of local development mods. Mods load from to
 to bottom through the original content loader. Changes take effect at the next
 complete game start; returning to an already running game keeps its current mods.
 Old files needed by that game remain until the next fresh start.
+**Delete all** removes installed mods after confirmation; other queued downloads
+remain. The manager follows all nine game languages.
 
 The native interface adapts to phones and tablets in both orientations. The tablet
 catalogue uses two or three columns, larger previews, wider details and separate
@@ -278,20 +325,20 @@ profiles.
 ## Local release files
 
 `pub/` is ignored by Git. Local release APKs follow the Heroes V convention:
-`crashday-0.2-dev-<first-eight-SHA256-characters>.apk`, accompanied by a `.sha256`
+`crashday-0.3-dev-<first-eight-SHA256-characters>.apk`, accompanied by a `.sha256`
 file containing the full checksum and APK basename. For example, after packaging:
 
 ```powershell
 New-Item -ItemType Directory -Force pub
 $apkSource = "build/apk/Crashday.apk"
 $apkHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkSource).Hash.ToLowerInvariant()
-$releaseName = "crashday-0.2-dev-$($apkHash.Substring(0, 8)).apk"
+$releaseName = "crashday-0.3-dev-$($apkHash.Substring(0, 8)).apk"
 Copy-Item -LiteralPath $apkSource -Destination (Join-Path pub $releaseName)
 "$apkHash  $releaseName" | Set-Content -Encoding ascii -LiteralPath (Join-Path pub ($releaseName -replace '\.apk$', '.sha256'))
 ```
 
 The version is stored in `android/app/AndroidManifest.xml`. This build uses
-`0.2-dev` / code `5`, above public `0.1-dev` / code `1`, `0.1.1-dev` / code `4`
+`0.3-dev` / code `6`, above public `0.1-dev` / code `1`, `0.1.1-dev` / code `4`, `0.2-dev` / code `5`
 and earlier local codes `2` and `3`. Increase `versionCode` for each later
 release and retain the same APK signing key.
 Preparing these local files does not publish a GitHub release or create a tag.
@@ -313,7 +360,49 @@ It runs on release changes, every six hours and through manual workflow dispatch
 The version, package, ABI, minimum SDK, certificate and SHA-256 come from the APK.
 Publish player-facing releases without GitHub's pre-release flag so the permanent
 `releases/latest` link works, even while the version name contains `-dev`.
-For future updates, increase `versionCode` above `5` and retain the signing key.
+For future updates, increase `versionCode` above `6` and retain the signing key.
+
+## Reproducible performance benchmark
+
+The local `heavy-v1` fixture records a Wrecking Match on `redline_cube.trk` with
+seven Hard opponents, double missiles/miniguns, nitro, pickups and medium damage.
+The runner selects Chase Cam (near), the first AI opponent and real-time playback.
+It uses 100% render/UI scale, a 60 FPS cap and the fixture's graphics/audio settings.
+
+With the current APK installed and the matching game data available, run:
+
+```powershell
+python tools/benchmark.py --serial SERIAL
+```
+
+By default this runs three 90-second samples after replay time 20 seconds.
+`--runs`, `--seconds`, `--warmup` and `--output` change the sampling parameters.
+The device must be unlocked. The script addresses only the supplied adb serial.
+It uses the reserved `userdata-BENCHMARK` profile and refuses to replace unowned
+files already present there. It stops the app at the end and retains its shader
+cache for subsequent measurements.
+
+The private fixture lives in `work/benchmarks/heavy-v1/`: `heavy-v1.rpl`,
+`graphics.config`, `audio.config` and `manifest.json`. Its manifest pins the replay,
+settings, original track and exact ASTC game archives by SHA-256. Keep these files
+unchanged between builds. The replay contains game data and stays outside Git.
+
+Results go to `work/benchmarks/results/<UTC timestamp>/results.json`, with the
+installed APK hash, actual resolution and replay time range. Per-frame CSVs use
+SurfaceFlinger's actual presentation timestamps; average FPS, the slowest 1%
+average FPS and p50/p95/p99 frame times are computed from those intervals.
+Loading, screenshots and memory/thermal snapshots are outside the measured interval.
+Each run also records startup-to-menu and replay-loading times in
+`run-N-loading.json` and `results.json`. Every run starts a new game process;
+Android's filesystem cache and the retained shader cache are not cleared.
+The runner rejects missing frame history, playback end and camera/speed/car changes.
+It also retains engine logs, screenshots, memory and battery/thermal snapshots.
+These outputs contain device details and stay outside Git.
+
+Replay playback measures rendering and recorded effects. It does not reproduce
+the cost of live AI decisions; compare live gameplay separately when changing AI
+or physics. Different resolutions, FPS caps, texture formats, drivers, charging
+conditions and temperatures must be accounted for when comparing devices.
 
 ## Status and known limitations
 

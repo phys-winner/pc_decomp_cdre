@@ -287,9 +287,9 @@ static void mkdirs(const char *path)
     char tmp[1024];
     snprintf(tmp, sizeof tmp, "%s", path);
     for (char *p = tmp + 1; *p; ++p) {
-        if (*p == '/') { *p = 0; mkdir(tmp, 0775); *p = '/'; }
+        if (*p == '/') { *p = 0; if (!mkdir(tmp, 0775)) listing_forget_parent(tmp, 0); *p = '/'; }
     }
-    mkdir(tmp, 0775);
+    if (!mkdir(tmp, 0775)) listing_forget_parent(tmp, 0);
 }
 
 static void prepare_write_parent(const char *path)

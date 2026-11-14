@@ -8,4 +8,7 @@ public final class GameOptions {
     public static boolean setLanguage(Context context, String value) {
         return State.put(context, State.CHOICES, "option.game_language", value);
     }
+    public static String language(Context context) {
+        return State.read(context, State.CHOICES).getProperty("option.game_language", "system");
+    }
 }

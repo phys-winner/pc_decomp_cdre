@@ -94,6 +94,8 @@ int main(void) {
     assert(!mouse_buttons[0] && !button_count && editor_requests==1);
 
     void_input_mouse_button(0,1);void_input_pump();
+    assert(!mouse_buttons[0] && button_count==1);
+    ++device.frame;void_input_pump();
     assert(mouse_buttons[0]);MEM32(0x926A28)=observed_buttons=0;editor_requests=0;
     for(int i=0;i<256;++i)void_input_mouse_button(0,1);
     epoch=android_input_epoch;void_input_mouse_button(0,0);
@@ -161,6 +163,17 @@ int main(void) {
         device.frame+=2;void_input_pump();assert(!mouse_buttons[button] && !button_count);
     }
     neutral();
+    guest_scene=5;
+    for(int i=0;i<12;++i){void_input_mouse_button(0,1);void_input_mouse_button(0,0);}
+    int presses=button_downs,releases=button_ups;
+    for(int i=0;i<12;++i) {
+        ++device.frame;void_input_pump();
+        assert(mouse_buttons[0] && button_downs==presses+i+1 && button_ups==releases+i);
+        MEM32(0x926A28)=observed_buttons=1;device.frame+=2;void_input_pump();
+        assert(!mouse_buttons[0] && button_ups==releases+i+1);
+        void_input_pump();assert(!mouse_buttons[0]);
+    }
+    assert(!button_count);neutral();
     puts("PASS input queues: overflow, neutral release, next tap, low-FPS guard and reentrant guest cancel/overflow");
     return 0;
 }

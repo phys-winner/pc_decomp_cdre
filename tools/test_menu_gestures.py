@@ -22,6 +22,7 @@ def method(source, signature):
 HARNESS = r'''
 public final class MenuGesturesProbe {
     static final class MotionEvent {
+        static int offsetX=17,offsetY=29;
         static final int ACTION_DOWN=0, ACTION_UP=1, ACTION_MOVE=2, ACTION_CANCEL=3,
             ACTION_POINTER_DOWN=5, ACTION_POINTER_UP=6;
         final int action,index; final int[] ids; final float[] xs,ys;
@@ -29,9 +30,9 @@ public final class MenuGesturesProbe {
         int getActionMasked(){return action;} int getActionIndex(){return index;}
         int getPointerCount(){return ids.length;} int getPointerId(int i){return ids[i];}
         int findPointerIndex(int id){for(int i=0;i<ids.length;i++) if(ids[i]==id)return i;return -1;}
-        float getRawX(int i){return xs[i];} float getRawY(int i){return ys[i];}
-        float getX(){return xs[0];} float getY(){return ys[0];}
-        float getX(int i){return xs[i];} float getY(int i){return ys[i];}
+        float getRawX(){return xs[0];} float getRawY(){return ys[0];}
+        float getX(){return xs[0]-offsetX;} float getY(){return ys[0]-offsetY;}
+        float getX(int i){return xs[i]-offsetX;} float getY(int i){return ys[i]-offsetY;}
     }
     static MotionEvent event(int action,int index,int[] ids,float... xy) {
         float[] xs=new float[ids.length],ys=new float[ids.length];
@@ -79,10 +80,10 @@ public final class MenuGesturesProbe {
     }
     static final class Menu {
         final Activity activity=new Activity();
-        static final int PAUSE=7,GAME=9,LOADING=13,READY=14,INTRO_CONTROLLER=15,CINEMATIC=16,WRECKED=17,FINISHED=18,PAD_START=0x10010,RACE_CONTINUE=0x30000;
-        int screen,pointer=-1,accepts,starts,continues,gestureControl,selection; boolean awaitingRaceStart;
+        static final int CAR=4,PAUSE=7,GAME=9,LOADING=13,READY=14,INTRO_CONTROLLER=15,CINEMATIC=16,WRECKED=17,FINISHED=18,CREDITS=21,PAD_START=0x10010,RACE_CONTINUE=0x30000;
+        int screen,pointer=-1,accepts,starts,continues,backs,gestureControl,selection; boolean awaitingRaceStart;
         Menu(){activity.menu=this;}boolean isCustom(){return false;}
-        void pulse(int key){if(key==PAD_START)++starts;else if(key==RACE_CONTINUE)++continues;else{check(key==13,"objective uses Enter");++accepts;}}
+        void pulse(int key){if(key==27)++backs;else if(key==PAD_START)++starts;else if(key==RACE_CONTINUE)++continues;else{check(key==13,"objective uses Enter");++accepts;}}
         float lastX,lastY,downX,downY,lastWheelY,wheelRemainder,lastOptionX,optionRemainder;
         boolean swiping,dragging,holding,intro,editorQueryPending; long editorQueryFrame;
         Runnable holdRunnable;
@@ -159,6 +160,18 @@ public final class MenuGesturesProbe {
         ++text.textGeneration;
         check(connection.deleteSurroundingText(1,0) && GameActivity.deletes==1,"stale connection cannot delete");
         check(connection.deleteSurroundingText(0,1) && GameActivity.deletes==1,"stale unsupported request is ignored");
+        MotionEvent.offsetX=MotionEvent.offsetY=0;
+        reset();m=new Menu();m.screen=Menu.CAR;GameActivity.control=0;
+        m.handleMotion(one(0,500,200));m.handleMotion(one(2,430,200));m.handleMotion(one(1,430,200));
+        check(GameActivity.options==1&&GameActivity.downs==0,"left car swipe selects next without confirming");
+        m.handleMotion(one(0,500,200));m.handleMotion(one(1,570,200));
+        check(GameActivity.options==1,"a tap without MOVE does not invent a swipe");
+        m.handleMotion(one(0,500,200));m.handleMotion(one(2,570,200));m.handleMotion(one(1,570,200));
+        check(GameActivity.options==0,"right car swipe selects previous");
+        reset();m=new Menu();m.screen=Menu.CREDITS;
+        m.handleMotion(one(0,900,450));m.handleMotion(one(1,900,450));
+        check(m.backs==1&&GameActivity.downs==0,"bottom-right credits tap exits once");
+        m.handleMotion(one(0,500,250));m.handleMotion(one(1,500,250));check(m.backs==1,"credits centre does not send Back");
         Settings settings=new Settings();settings.onTransformedTouch(one(0,100,120));settings.onTransformedTouch(one(2,100,200));settings.onTransformedTouch(one(1,100,220));
         check(settings.selected==3 && settings.scroll!=0 && settings.changes==0 && settings.activations==0,"settings vertical scroll keeps selection");
         settings.onTransformedTouch(one(0,100,120));settings.onTransformedTouch(one(2,200,120));
@@ -180,23 +193,27 @@ class MenuGesturesTest(unittest.TestCase):
         harness = r'''
 public final class MenuSyncProbe {
     static final class View {static final int VISIBLE=0,GONE=8;void setVisibility(int v){}void setText(String text){}}
-    static final class Settings {boolean full;void setEntry(boolean b,boolean s){}boolean isFull(){return full;}void setVisibility(int v){}}
+    static final class Settings {boolean full;void setControllerPage(boolean value){}void setEntry(boolean b,boolean s){}boolean isFull(){return full;}void setVisibility(int v){}}
     static final class Menu {
-        boolean race,paused,ready,replay;void syncNativeScene(){}boolean isOptions(){return false;}int selection(){return 0;}
+        boolean race,paused,ready,replay;int queries;void syncNativeScene(){++queries;}boolean isOptions(){return false;}int selection(){return 0;}
         boolean inGame(){return race;}boolean isPaused(){return paused;}boolean awaitingRaceStart(){return ready;}boolean isCustom(){return false;}boolean isCinematic(){return false;}
         boolean isReplay(){return replay;}int scene(){return replay?20:race?9:0;}
     }
     static final class Scenes {void setScene(int scene,int state,boolean controls){}}
     static final class Driving {
-        boolean inGame,enabled=true,legacy,pauseHint;int visibility;void setInGame(boolean v){if(inGame!=v){inGame=v;nativeDriving(false);}}
+        boolean inGame,enabled=true,pauseHint;int visibility;void setInGame(boolean v){if(inGame!=v){inGame=v;nativeDriving(false);}}
         void setPauseHint(boolean v){pauseHint=v;}
-        void publishWeaponHud(boolean active){}void setWeaponsEnabled(int v){}boolean isLegacyLayout(){return legacy;}boolean isEnabled(){return enabled;}void setVisibility(int v){visibility=v;}
+        void publishWeaponHud(boolean active){}void setWeaponsEnabled(int v){}boolean isEnabled(){return enabled;}void setVisibility(int v){visibility=v;}
     }
     static final class Handler {void postDelayed(Runnable r,int delay){}}
     static final class Launch {void firstFrame(Object root){}void exited(int result){}}
     final Settings portSettings=new Settings();final View driveButton=new View(),status=new View(),continueButton=new View();final Driving drivingControls=new Driving();final Menu touchMenu=new Menu();final Scenes sceneControls=new Scenes();
     final Handler handler=new Handler();final Launch launch=new Launch();final Object root=new Object();
-    boolean touchEditor,hardwareInput,gameReady=true,started=true,launcherVisible;static int pending;static boolean touchHud,countdown;
+    static class Pad {void setSteering(int sensitivity,boolean active){}}
+    final Pad gamepad=new Pad();int turnSensitivity=10;
+    static class Vibration {void stop(){}}
+    final Vibration vibration=new Vibration();static int nativeRumble(boolean clear){return 0;}
+    boolean touchEditor,hardwareInput,gameReady=true,surfaceReady=true,activityResumed=true,started=true,launcherVisible;static int pending;static boolean touchHud,countdown;
     static int nativeStatus(){return Integer.MAX_VALUE;}static boolean nativeLauncherClick(){return false;}
     String tr(String en,String ru){return en;}
     static void nativeDriving(boolean active){if(!active)pending=0;}
@@ -210,6 +227,12 @@ public final class MenuSyncProbe {
     /* PROGRESS */
     public static void main(String[] args){
         MenuSyncProbe p=new MenuSyncProbe();pending=0x10;
+        p.gameReady=false;p.syncMenu();
+        p.gameReady=true;p.surfaceReady=false;p.syncMenu();p.progress.run();
+        if(p.touchMenu.queries!=0)throw new AssertionError("UI polling blocked surface creation while the renderer held the machine");
+        p.surfaceReady=true;p.activityResumed=false;p.progress.run();
+        if(p.touchMenu.queries!=0)throw new AssertionError("background polling must not wait on the suspended renderer");
+        p.activityResumed=true;
         p.syncMenu();p.syncMenu();p.syncMenu();
         if(pending!=0x10)throw new AssertionError("menu refresh consumed START before original controller poll");
         p.progress.run();p.progress.run();p.progress.run();
@@ -238,8 +261,6 @@ public final class MenuSyncProbe {
         if(p.drivingControls.visibility!=View.GONE||touchHud)throw new AssertionError("menu cannot intercept invisible pause");
         p.touchMenu.race=true;p.drivingControls.enabled=true;p.syncMenu();
         if(p.drivingControls.visibility!=View.VISIBLE||!touchHud)throw new AssertionError("reenabling restores touch HUD");
-        p.drivingControls.legacy=true;p.syncMenu();
-        if(p.drivingControls.visibility!=View.VISIBLE||touchHud)throw new AssertionError("classic layout keeps original HUD");
     }
 }
 '''

@@ -38,7 +38,9 @@ public final class InputPromptsProbe {
     }
     static class Controls {boolean enabled=true;boolean isEnabled(){return enabled;}}
     static class Settings {boolean full;boolean isFull(){return full;}}
-    static class GamepadInput {static boolean external;static boolean externalInputAttached(){return external;}}
+    static class GamepadInput {static boolean external;static boolean externalInputAttached(){return external;}int deviceId(){return Integer.MIN_VALUE;}}
+    static class Vibration {void refreshController(int id){}}
+    final GamepadInput gamepad=new GamepadInput();Vibration vibration;
     AlertDialog inputDialog,nameDialog;
     boolean inputPrompted,externalInputAttached,gameReady,activityResumed=true,touchEditor,textEditorActive,started=true,surfaceReady=true,paused;
     int releases,toggles;final Preferences preferences=new Preferences();final Controls drivingControls=new Controls();final Settings portSettings=new Settings();

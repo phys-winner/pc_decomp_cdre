@@ -103,6 +103,8 @@ def main():
             (ROOT / "reference/mojoshader/LICENSE.txt", "mojoshader-LICENSE.txt"),
             (ROOT / "reference/astcenc/LICENSE.txt", "astcenc-LICENSE.txt"),
             (ROOT / "reference/etcpak/LICENSE.txt", "etcpak-LICENSE.txt"),
+            (ROOT / "reference/fsr1/license.txt", "AMD-FSR1-LICENSE.txt"),
+            (ROOT / "reference/fsr3/LICENSE.txt", "AMD-FSR3-LICENSE.txt"),
             (ROOT / "licenses/NFSMW-Recompiled-Mobile.txt", "NFSMW-Recompiled-Mobile-LICENSE"),
         ):
             shutil.copy2(source, assets / target)
@@ -121,14 +123,14 @@ def main():
         run(tools / "aapt2.exe", "link", "-I", android, "--manifest", prepared["manifest"],
             "-0", "cpk", "-0", "cdx", "-0", "trk", "-0", "bmp", "-0", "exe", "-0", "dll",
             "-A", assets, stage / "resources.zip", "-o", stage / "base.apk")
-        sources = sorted((ROOT / "android/app/src").rglob("*.java")) + [Path(path) for path in prepared["sources"]]
+        sources = sorted((ROOT / "android/app/src/org/crashday").rglob("*.java")) + [Path(path) for path in prepared["sources"]]
         javac_args = stage / "javac.args"
         javac_args.write_text("\n".join(str(path) for path in sources), encoding="utf-8")
         run(java / "javac.exe", "--release", "8", "-encoding", "UTF-8", "-cp", android, "-d", classes, "@" + str(javac_args))
         d8_args = stage / "d8.args"
         d8_args.write_text("\n".join(str(path) for path in sorted(classes.rglob("*.class"))), encoding="utf-8")
         run(java / "java.exe", "-cp", tools / "lib/d8.jar", "com.android.tools.r8.D8",
-            "--lib", android, "--min-api", "30", "--output", dex, "@" + str(d8_args))
+            "--lib", android, "--min-api", "26", "--output", dex, "@" + str(d8_args))
         unsigned = stage / "unsigned.apk"
         shutil.copy2(stage / "base.apk", unsigned)
         with zipfile.ZipFile(unsigned, "a", zipfile.ZIP_DEFLATED) as apk:

@@ -333,8 +333,8 @@ int main(void){
 
     def test_android_rate_selection_and_resume(self):
         activity = (ROOT / "android/app/src/org/crashday/port/GameActivity.java").read_text(encoding="utf-8")
-        signatures = ("private static float maximum(", "private void refreshFpsRates(", "private boolean containsFps(",
-                      "private float fpsValue(", "private void applyFps(", "private void pollRefreshRate(", "void cycleFps(")
+        signatures = ("private void refreshFpsRates(", "private boolean containsFps(",
+                      "private float fpsValue(", "private void applyFps(", "private void pollRefreshRate(")
         functions = "\n".join(method(activity, s) for s in signatures)
         launch = (ROOT / "android/launcher/android/src/port/launcher/Launch.java").read_text(encoding="utf-8")
         functions += "\n" + method(launch, "static void resume(Activity launcher, Spec.Distribution d)")
@@ -372,7 +372,8 @@ public class DisplayResumeProbe {
   check(Arrays.equals(published,new float[]{60,90,120}));
   check(p.window.p.preferredDisplayModeId==3&&p.window.p.preferredRefreshRate==120&&paced==120&&selected==120);
   request=90;p.pollRefreshRate();check(p.displayRate==90&&p.preferences.value==90&&paced==90&&p.window.p.preferredDisplayModeId==2);
-  p.fpsLimit=60;p.applyFps();check(paced==60&&selected==90&&p.window.p.preferredRefreshRate==90);
+  p.fpsLimit=60;p.applyFps();check(paced==90&&selected==90&&p.window.p.preferredRefreshRate==90);
+  p.fpsQaOverride=true;p.applyFps();check(paced==60);
   p.fpsLimit=0;p.applyFps();check(paced==90);
   request=144;p.pollRefreshRate();check(p.displayRate==90);
   p.displayRate=144;p.applyFps();check(p.displayRate==0&&p.window.p.preferredDisplayModeId==0&&selected==60);
@@ -385,7 +386,8 @@ public class DisplayResumeProbe {
   check(p.displayRate==120&&p.fpsLimit==60&&paced==60&&p.window.p.preferredDisplayModeId==2);
   request=60;p.pollRefreshRate();check(p.displayRate==60.000004f&&paced==60&&p.window.p.preferredDisplayModeId==1);
   request=120;p.pollRefreshRate();check(p.displayRate==120.00001f&&paced==60&&p.window.p.preferredDisplayModeId==2);
-  p.cycleFps(1);check(p.fpsLimit==120.00001f&&paced==120.00001f);
+  p.fpsLimit=30;p.fpsQaOverride=false;p.applyFps();check(paced==120.00001f);
+  p.fpsQaOverride=true;p.applyFps();check(paced==30);
  }
 }
 '''.replace("/* FUNCTIONS */", functions)

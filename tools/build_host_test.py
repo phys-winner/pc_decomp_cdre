@@ -22,13 +22,17 @@ def main():
     p.add_argument("--define", action="append", default=[])
     p.add_argument("--exclude", action="append", default=[])
     a = p.parse_args()
+    from fsr_shaders import generate_fsr1
+    generate_fsr1(ROOT / "generated")
+    from fsr3_shaders import pack_fsr3
+    pack_fsr3(ROOT / "generated")
     clang = NDK / "toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
     text = a.test.read_text(encoding="utf-8")
     included = {Path(m).name for m in re.findall(r'#include "\.\./\.\./android/host/([a-z0-9_]+\.c)"', text)}
     included |= {Path(m).name for m in re.findall(r'#include "\.\./\.\./reference/mojoshader/([a-z0-9_]+\.c)"', text)}
     skip = {Path(n).stem for n in included} | set(a.exclude)
     objects = [o for o in sorted(a.objects.rglob("*.o")) if o.stem not in skip]
-    flags = ["--target=aarch64-linux-android30", "-O1", "-g", "-fno-strict-aliasing", "-fwrapv", "-ffp-contract=off",
+    flags = ["--target=aarch64-linux-android26", "-O1", "-g", "-fno-strict-aliasing", "-fwrapv", "-ffp-contract=off",
              "-DRECOMP_X87_WINDOW", "-Iandroid/runtime", "-Iandroid/host", "-Igenerated", "-Ireference/mojoshader",
              "-DCRASHDAY_ANDROID_APP", "-std=gnu11", "-w"] + ["-D" + d for d in a.define]
     a.output.parent.mkdir(parents=True, exist_ok=True)

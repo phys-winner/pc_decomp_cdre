@@ -40,12 +40,13 @@ public final class HardwareInputProbe extends HardwareInputBase {
     }
     static class KeyEvent {
         /* KEY_CONSTANTS */
-        int code,action,source=InputDevice.SOURCE_GAMEPAD,id=4;boolean cancelled;
+        int code,action,repeat,source=InputDevice.SOURCE_GAMEPAD,id=4;boolean cancelled;
         InputDevice device;
         int unicode;String characters;boolean ctrl,alt;
         KeyEvent(int c,int a){code=c;action=a;}
         int getKeyCode(){return code;}int getAction(){return action;}int getDeviceId(){return id;}
         InputDevice getDevice(){return device;}boolean isCanceled(){return cancelled;}
+        int getRepeatCount(){return repeat;}
         int getUnicodeChar(){return unicode;}String getCharacters(){return characters;}
         boolean isCtrlPressed(){return ctrl;}boolean isAltPressed(){return alt;}
         boolean isFromSource(int s){return (source&s)==s;}
@@ -61,6 +62,7 @@ public final class HardwareInputProbe extends HardwareInputBase {
         float getRawX(){return x;}float getRawY(){return y;}int getButtonState(){return buttons;}
     }
     static class GameActivity {
+        static void nativeSteeringDigital(boolean value){}
         static int buttons,resets;static float lx,ly,rx,ry,lt,rt;
         static void nativeController(int b,float x,float y,float z,float w,float l,float r){buttons=b;lx=x;ly=y;rx=z;ry=w;lt=l;rt=r;}
         static void nativeDriving(boolean active){if(!active)++resets;}
@@ -70,14 +72,17 @@ public final class HardwareInputProbe extends HardwareInputBase {
     static class View {}
     static class Settings {
         boolean full;int key;boolean down;
+        void invalidate(){}
         boolean isFull(){return full;}void onKey(int k,boolean d){key=k;down=d;}boolean onTouch(MotionEvent e){return true;}
     }
     static class Driving {void release(){}void setHardwareInput(boolean value){}boolean handleMotion(MotionEvent e){return true;}}
-    static class Menu {boolean paused;boolean isPaused(){return paused;}void onNativeKey(int k,boolean down){}}
+    static class Menu {boolean paused;int scene;int scene(){return scene;}boolean isPaused(){return paused;}void onNativeKey(int k,boolean down){}}
     final Settings portSettings=new Settings();final Driving drivingControls=new Driving();final Menu touchMenu=new Menu();
     final GamepadInput gamepad=new GamepadInput();final View surface=new View();
     Object nameDialog,inputDialog;boolean touchEditor,hardwareInput,textWanted;int keys,nativeKeyValue,backs;String text="";
     void syncMenu(){}void back(){++backs;}void nativeTouchMode(boolean touch){}
+    int padToggles,deviceToggles;void toggleControllerVibration(){++padToggles;}void toggleDeviceVibration(){++deviceToggles;}
+    void nativeSteeringDigital(boolean value){}
     boolean nativeTextEditorWanted(){return textWanted;}void nativeText(String value){text+=value;}
     void nativeKey(int vk,boolean down){++keys;nativeKeyValue=vk;}
     int mouseButtons,settingsDirections,nativeButtons,wheel,names,cancels,raceHits;boolean profileClick,hit,raceHit;float pointerX,pointerY;
@@ -129,6 +134,10 @@ public final class HardwareInputProbe extends HardwareInputBase {
         m.values.put(17,.3f);m.values.put(18,.8f);
         check(p.motion(m),"joystick consumed");near(GameActivity.lx,.75f);near(GameActivity.ly,-.5f);
         near(GameActivity.rx,-.25f);near(GameActivity.ry,.6f);near(GameActivity.lt,.3f);near(GameActivity.rt,.8f);
+        p.setSteering(5,true);near(GameActivity.lx,.375f);
+        p.setSteering(20,true);near(GameActivity.lx,1);
+        p.setSteering(20,false);near(GameActivity.lx,.75f);
+        near(GamepadInput.steering(-.8f,5),-.4f);near(GamepadInput.steering(-.8f,20),-1);
         p.key(new KeyEvent(99,0));m.values.put(0,.2f);p.motion(m);
         check((GameActivity.buttons&0x4000)!=0,"axis event preserves held X");
         m.values.put(15,-1f);m.values.put(16,1f);p.motion(m);
@@ -190,6 +199,11 @@ public final class HardwareInputProbe extends HardwareInputBase {
         h=new HardwareInputProbe();KeyEvent padX=new KeyEvent(99,0);
         check(h.dispatchKeyEvent(padX)&&h.hardwareInput,"activity routes pad keys before keyboard translation");
         check((GameActivity.buttons&0x4000)!=0&&h.keys==0,"X reaches XInput without a keyboard alias");
+        h.touchMenu.scene=22;KeyEvent lb=new KeyEvent(KeyEvent.KEYCODE_BUTTON_L1,0);h.dispatchKeyEvent(lb);
+        lb.repeat=1;h.dispatchKeyEvent(lb);lb.action=1;h.dispatchKeyEvent(lb);
+        check(h.padToggles==1,"advanced controller vibration toggles once per press, without repeats or releases");
+        KeyEvent rb=new KeyEvent(KeyEvent.KEYCODE_BUTTON_R1,0);h.dispatchKeyEvent(rb);
+        check(h.deviceToggles==1,"advanced device vibration has its own controller shortcut");h.touchMenu.scene=0;
         h.cancels=0;
         KeyEvent arrow=new KeyEvent(21,0);arrow.source=InputDevice.SOURCE_KEYBOARD;
         check(h.dispatchKeyEvent(arrow)&&h.nativeKeyValue==37,"activity preserves keyboard arrows");

@@ -40,6 +40,7 @@
 !/config/
 /config/*
 !/config/*.json
+!/config/heavy-v1.profdata
 
 !/generated/
 /generated/*
@@ -74,6 +75,10 @@
 !/reference/pcrecomp/tools/**
 !/reference/mojoshader/
 !/reference/mojoshader/**
+!/reference/fsr1/
+!/reference/fsr1/**
+!/reference/fsr3/
+!/reference/fsr3/**
 !/reference/dlmalloc/
 !/reference/dlmalloc/**
 !/reference/astcenc/

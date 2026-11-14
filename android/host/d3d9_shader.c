@@ -355,6 +355,14 @@ static char *patch_source(const char *original, int pixel, int major)
         free(shadow);
     }
     /* Gather needs 3.10, and linked stages (including fixed-function halves) must agree. */
+    extern int d3d_gl_temporal_enabled(void);
+    if (pixel && d3d_gl_temporal_enabled() && !strstr(out, "layout(location=1)") && !strstr(out, "ps_oC1")) {
+        /* shortcut: animated programmable surfaces reject history until their previous vertices are available. */
+        const char *helper = "layout(location=1)out highp vec4 port_motion;layout(location=2)out highp vec4 port_reactive;\n";
+        char *declared = insert_before(out, "void main()", helper); free(out);
+        out = insert_before(declared, "\tvoid_alpha_test();", "port_motion=vec4(0.,0.,0.,1.);port_reactive=vec4(1.,0.,0.,1.);\n");
+        free(declared);
+    }
     if (!strncmp(out, "#version 300 es", 15)) memcpy(out, "#version 310 es", 15);
     return out;
 }

@@ -111,6 +111,14 @@ static void mirror_script(void)
     memset(&dev, 0, sizeof dev);
     dev.pp[0] = 640; dev.frame = 9;
     d3d_rt_device_reset(&dev);
+    d3d_rt_sync_state(&dev);
+    d3d_rt_sync(compare_mirror, NULL);
+    uint32_t owner_generation = d3d_constant_generation;
+    dev.st.world_identity = 0x12345678;
+    D3D_RT_DIRTY(&dev, dev.st.world_identity);
+    d3d_rt_sync_state(&dev);
+    d3d_rt_sync(compare_mirror, NULL);
+    assert(d3d_constant_generation == owner_generation);
     uint32_t generation = d3d_constant_generation;
     for (int i = 0; i < 20000; ++i) {
         for (int k = next() % 5; k >= 0; --k) mutate();
@@ -152,6 +160,7 @@ int main(void)
     setenv("VOID_RENDER_THREAD", "1", 1);
     d3d_rt_start();
     assert(d3d_rt_threaded());
+    assert((uintptr_t)ring % 64 == 0);
     script(RECORDS);
     d3d_rt_finish();
     assert(atomic_load(&trace_count) == inline_count);

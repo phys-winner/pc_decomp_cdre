@@ -65,7 +65,7 @@ class ShaderRangesTest(unittest.TestCase):
         source = Path(os.environ.get("CRASHDAY_TEST_SHADER", ROOT / "android/host/d3d9_shader.c")).read_text(encoding="utf-8")
         actual = source[source.index("static char *insert_before("):source.index("static uint8_t *with_synthetic_ctab(")]
         call = "patch_source(src, atoi(argv[1]), atoi(argv[2]))" if "int pixel, int major)" in actual else "patch_source(src, atoi(argv[1]))"
-        harness = "#include <stdint.h>\n#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n#include <ctype.h>\n" + actual + """
+        harness = "#include <stdint.h>\n#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n#include <ctype.h>\nint d3d_gl_temporal_enabled(void){return 0;}\n" + actual + """
 int main(int argc,char **argv) {
     char src[65536]; size_t n=fread(src,1,sizeof(src)-1,stdin); src[n]=0;
     char *out=CALL; fputs(out,stdout); free(out); return 0;

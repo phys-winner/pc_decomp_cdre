@@ -46,16 +46,17 @@ class AndroidContractsTest(unittest.TestCase):
         builder = read("tools/build_apk.py")
         self.assertIn("args.external = True", builder)
 
-    def test_safe_area_cancels_and_transforms_both_touch_and_drawing(self):
+    def test_safe_area_cancels_and_controls_reach_full_display(self):
         activity = read("android/app/src/org/crashday/port/GameActivity.java")
         self.assertIn("WindowInsets.Type.displayCutout()", activity)
         self.assertIn("cancelInput();\n        drivingControls.setSafeInsets", activity)
         self.assertIn("setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC)", activity)
         self.assertIn("WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE", activity)
-        for relative in (
-            "android/app/src/org/crashday/port/DrivingControls.java",
-            "android/app/src/org/crashday/port/PortSettingsView.java",
-        ):
+        controls = read("android/app/src/org/crashday/port/DrivingControls.java")
+        self.assertIn("return handleTransformedMotion(event);", controls)
+        self.assertNotIn("transformed.offsetLocation", controls)
+        self.assertNotIn("canvas.translate(safeLeft, safeTop)", controls)
+        for relative in ("android/app/src/org/crashday/port/PortSettingsView.java",):
             source = read(relative)
             self.assertIn("MotionEvent.obtain(event)", source, relative)
             self.assertIn("transformed.offsetLocation(-safeLeft, -safeTop)", source, relative)
@@ -131,8 +132,8 @@ class AndroidContractsTest(unittest.TestCase):
         self.assertIn("crashday_widget_name(widget, \"btnQuitOptions\")", android)
         self.assertIn("menu_layout.scroll", android)
         self.assertNotIn("surface.setScaleX", activity)
-        self.assertIn("event.getRawX(index)", menu)
-        self.assertIn("event.getRawY(index)", menu)
+        self.assertIn("event.getX(index) + event.getRawX() - event.getX()", menu)
+        self.assertIn("event.getY(index) + event.getRawY() - event.getY()", menu)
         hold = menu[menu.index("    private void armHold()"):menu.index("    private void stepOption(")]
         self.assertNotIn("nativeRightButton", hold)
         self.assertNotIn("RIGHT_CLICK", hold)
@@ -163,7 +164,7 @@ class AndroidContractsTest(unittest.TestCase):
         self.assertIn("if (editorQueryPending && GameActivity.nativeUiFrame() >= editorQueryFrame + 2)", menu)
         self.assertIn("editorQueryFrame = GameActivity.nativeUiFrame();", menu)
         self.assertIn("Java_org_crashday_port_GameActivity_nativeUiFrame", android)
-        self.assertIn("if (!game_started) return -1;", android)
+        self.assertIn("if (!game_started || !__atomic_load_n(&frame_ready, __ATOMIC_ACQUIRE)) return -1;", android)
         self.assertIn("if (!game_started) return JNI_FALSE;", android)
         self.assertIn("btnRestoreQuickChatDefaults", android)
         self.assertNotIn('crashday_widget_name(widget, "inpCustomMessage1")', android)
@@ -219,11 +220,14 @@ class AndroidContractsTest(unittest.TestCase):
         self.assertIn("d3d_gl_blit(scene_depth, sr, d->auto_depth, dr, 1);", gl)
         self.assertIn("if (scene_phase || scene_promoted) return surface;", gl)
         self.assertIn("scene_phase = scene_promoted = 0;", gl)
-        self.assertIn("gl_Position.xy *= ff_ui_scale;", ff)
+        self.assertNotIn("gl_Position.xy *= ff_ui_scale;", ff)
         self.assertEqual(tick.count("d3d_gl_ui_pass(1);"), 2)
         self.assertIn("changeRenderScale", activity)
         self.assertIn("crashTest, renderScale);", activity)
-        self.assertIn("if (!fpsQaOverride && fpsLimit != 0 && !containsFps(fpsLimit))", activity)
+        self.assertNotIn('preferences.getFloat("fpsLimit"', activity)
+        self.assertNotIn('preferences.getInt("fpsLimit"', activity)
+        self.assertNotIn("void cycleFps(", activity)
+        self.assertIn("return !fpsQaOverride || fpsLimit == 0 ? active", activity)
         self.assertIn("fpsQaOverride = qaProfile != null && getIntent().hasExtra(\"fpsLimit\")", activity)
         main = read("android/host/main.c")
         self.assertLess(main.index("void_input_selftest_flush();", main.index("void_input_key(0x28, 1)"),), main.index("void_input_keyboard_snapshot(scan_codes);"))

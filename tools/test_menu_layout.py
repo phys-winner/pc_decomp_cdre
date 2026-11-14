@@ -24,10 +24,28 @@ static int void_vm_readable(uint32_t a,unsigned n){return a<sizeof memory && n<=
 static int void_vm_writable(uint32_t a,unsigned n){return void_vm_readable(a,n);}
 static uint32_t g_esp=0x10000;
 static struct {float f32[4];} g_xmm[8];
+static int font_entry,font_calls;
+static float font_y;
+typedef int pthread_mutex_t;
+#define PTHREAD_MUTEX_INITIALIZER 0
+static void pthread_mutex_lock(int *p){assert(!*p);*p=1;}
+static void pthread_mutex_unlock(int *p){assert(*p);*p=0;}
+typedef struct {uint32_t esp;unsigned char xmm[sizeof g_xmm];} void_regs;
+static void void_regs_save(void_regs *r){r->esp=g_esp;memcpy(r->xmm,g_xmm,sizeof g_xmm);}
+static void void_regs_load(const void_regs *r){g_esp=r->esp;memcpy(g_xmm,r->xmm,sizeof g_xmm);}
+static uint32_t void_galloc(unsigned n){assert(n==512);return 0x98000;}
+static int void_dispatch_find(uint32_t fn){return fn==0x1234;}
+static uint32_t void_call_guest_this(uint32_t fn,uint32_t w,unsigned n,const uint32_t *args){
+ assert(fn==0x1234&&w==0x9000&&n==3&&!args[0]&&!args[1]&&!args[2]);
+ assert(!strcmp((char *)GPTR(MEM32(w+0x180)),"ADDITIONAL SETTINGS"));
+ assert(MEM32(w+0x190)==19&&MEM32(w+0x194)==511&&MEM8(w+0x75));
+ assert(fabsf(MEMF(w+0x7C)-font_y)<.001f&&fabsf(MEMF(w+0xAC)-font_y)<.001f);
+ ++font_calls;g_esp=123;g_xmm[0].f32[0]=123;return 0;
+}
 static const char *crashday_widget_text(uint32_t w){return w==0x9000 ? "frmTest":"lblTest";}
-static int crashday_widget_name(uint32_t w,const char *name){(void)w;(void)name;return 0;}
+static int crashday_widget_name(uint32_t w,const char *name){return font_entry&&w==0x9000&&!strcmp(name,"btnCredits");}
 static uint32_t crashday_ui_container(void){return 0x3000;}
-static int crashday_ui_scene(void *out){(void)out;return 12;}
+static int crashday_ui_scene(void *out){(void)out;return font_entry?5:12;}
 /* PRODUCTION */
 int main(void){
     MEM32(0x869418)=0x1000;MEM32(0x870260)=0x2000;MEMF(0x20E4)=1.625f;
@@ -80,12 +98,106 @@ int main(void){
     g_xmm[3].f32[0]=0;scale=crashday_ui_text_begin(2);assert(g_xmm[3].f32[0]==24);
     crashday_ui_text_end(scale);crashday_ui_draw_end();assert(menu_draw_scale==1);
     crashday_ui_draw_begin(0x1234);assert(menu_draw_scale==1);
+    font_entry=1;MEM32(0x9000)=0x99000;MEM32(0x9900C)=0x1234;
+    for(int percent=100;percent<=150;percent+=25){
+        float factor=percent/100.0f,height=24*factor,top=160+120*factor;
+        MEMF(0x9078)=40;MEMF(0x907C)=top;MEMF(0x9080)=200;MEMF(0x9084)=height;
+        memcpy(GPTR(0x90A8),GPTR(0x9078),16);MEM8(0x9075)=1;
+        font_y=fminf(top+height*1.3f,420-height);
+        assert(settings_entry_y(0x9000)==font_y&&font_y>=top+height&&font_y+height<=420);
+        unsigned char widget[0x198];memcpy(widget,GPTR(0x9000),sizeof widget);
+        void_regs regs;void_regs_save(&regs);
+        crashday_ui_draw_begin(0x9000);crashday_ui_draw_end();
+        assert(font_calls==(percent-100)/25+1&&!memcmp(widget,GPTR(0x9000),sizeof widget));
+        assert(g_esp==regs.esp&&!memcmp(g_xmm,regs.xmm,sizeof g_xmm));
+    }
+    MEMF(0x907C)=400;assert(isnan(settings_entry_y(0x9000)));
+    MEMF(0x907C)=NAN;assert(isnan(settings_entry_y(0x9000)));
+    MEMF(0x907C)=260;MEMF(0x9084)=-1;assert(isnan(settings_entry_y(0x9000)));
     return 0;
 }
 '''
 
 
 class MenuLayoutTest(unittest.TestCase):
+    def test_car_hitboxes_and_swipes(self):
+        from test_menu_gestures import method
+        source = (ROOT / "android/host/android_main.c").read_text(encoding="utf-8")
+        code = method(source, "static void crashday_ui_snap_pointer(") + "\n" + method(source, "JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeMenuOption")
+        probe = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+#include <string.h>
+#define JNIEXPORT
+#define JNICALL
+#define JNI_TRUE 1
+#define JNI_FALSE 0
+typedef void JNIEnv;typedef void *jclass;typedef int jint;typedef int jboolean;
+static unsigned char memory[0x900000];
+#define GPTR(a) (memory+(a))
+#define MEM32(a) (*(uint32_t *)GPTR(a))
+#define MEM16(a) (*(uint16_t *)GPTR(a))
+#define MEM8(a) memory[a]
+#define MEMF(a) (*(float *)GPTR(a))
+static int game_started=1,scene=4,downs,ups,mx,my;
+static uint32_t gesture_widget,gesture_container=0x1000,gesture_callback=0x1234;
+static int void_vm_readable(uint32_t a,unsigned n){return a<sizeof memory&&n<=sizeof memory-a;}
+static uint32_t crashday_ui_container(void){return 0x1000;}
+static uint32_t crashday_editor_view(void){return 0;}
+static int crashday_ui_scene(void *p){return scene;}
+static const char *crashday_widget_text(uint32_t w){return w==0x3000?"btnLastCar":w==0x4000?"btnNextCar":w==0x5000?"swtColor":0;}
+static int crashday_widget_name(uint32_t w,const char *name){const char *text=crashday_widget_text(w);return text&&!strcmp(text,name);}
+static void void_machine_enter(void){}static void void_machine_leave(void){}
+static void void_input_screen_size(int *w,int *h){*w=1040;*h=480;}
+static void void_input_mouse_warp(int x,int y){mx=x;my=y;}
+static void void_input_mouse_button(int button,int down){assert(button==0);if(down)++downs;else ++ups;}
+/* PRODUCTION */
+int main(void){
+ MEM32(0x869418)=0x6000;MEM32(0x6000)=0x1234;MEM32(0x870260)=0x7000;MEMF(0x70E4)=1.625f;
+ MEM16(0x1030)=3;MEM32(0x1034)=0x2000;
+ for(unsigned i=0;i<3;++i){uint32_t w=0x3000+i*0x1000;MEM32(0x2000+i*4)=w;MEM8(w+0x74)=MEM8(w+0x75)=1;MEMF(w+0x7C)=210;MEMF(w+0x80)=40;MEMF(w+0x84)=60;}
+ MEMF(0x3078)=-5;MEMF(0x4078)=1005;MEMF(0x5078)=500;MEMF(0x507C)=350;
+ float x=70.f/1040,y=180.f/480;crashday_ui_snap_pointer(&x,&y);assert(fabsf(x*1040-17.5f)<.001f&&y==.5f);
+ x=970.f/1040;y=300.f/480;crashday_ui_snap_pointer(&x,&y);assert(fabsf(x*1040-1022.5f)<.001f&&y==.5f);
+ assert((int)(x*640)*1.625f>1005); /* Cursor quantization must stay inside the right arrow. */
+ x=.5f;y=.5f;crashday_ui_snap_pointer(&x,&y);assert(x==.5f&&y==.5f);
+ assert(Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,1)&&mx>1005&&downs==1&&ups==1);
+ assert(Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,-1)&&mx>0&&mx<35&&downs==2);
+ gesture_widget=0x5000;assert(Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,1)&&mx>500&&mx<540&&my==380);
+ gesture_widget=0;gesture_callback=0x9999;assert(!Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,1));
+ gesture_callback=0x1234;MEM8(0x4075)=0;assert(!Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,1));
+ assert(!Java_org_crashday_port_GameActivity_nativeMenuOption(0,0,0));return 0;
+}
+'''
+        self.run_probe("car-controls", probe.replace("/* PRODUCTION */", code))
+
+    def test_controller_settings_are_visible_and_scrollable(self):
+        from test_menu_gestures import method
+        source = (ROOT / "android/host/android_main.c").read_text(encoding="utf-8")
+        start = source.index("static int menu_scale")
+        code = source[start:source.index("JNIEXPORT", start)]
+        code += method(source, "void crashday_ui_prepare(void)")
+        prefix = HARNESS[:HARNESS.index("int main(void)")]
+        prefix = prefix.replace('return w==0x9000 ? "frmTest":"lblTest";', 'return w==0x9000 ? "frmTest":"sldSteerSensitivity";')
+        prefix = prefix.replace('return font_entry?5:12;', 'return 22;')
+        probe = r'''
+int main(void){
+ MEM32(0x869418)=0x1000;MEM32(0x870260)=0x2000;MEMF(0x20E4)=1.625f;
+ MEM16(0x3030)=4;MEM32(0x3034)=0x4000;
+ for(unsigned i=0;i<4;++i){uint32_t w=0x5000+i*0x300;MEM32(0x4000+i*4)=w;
+  MEMF(w+0x78)=533;MEMF(w+0x7C)=730+i*145;MEMF(w+0x80)=463;MEMF(w+0x84)=14;
+  MEM8(w+0x74)=1;MEM8(w+0x75)=0;memcpy(GPTR(w+0xA8),GPTR(w+0x78),16);
+ }
+ crashday_ui_prepare();assert(MEM8(0x5075)&&MEMF(0x507C)==190&&MEMF(0x50AC)==190);
+ assert(menu_scrollable&&menu_layout.top==182);menu_scroll_steps=-16;crashday_ui_prepare();
+ assert(MEM8(0x5975)&&MEMF(0x597C)+14<=420);
+ menu_scale=150;menu_scroll_steps=16;crashday_ui_prepare();assert(MEM8(0x5075)&&MEMF(0x507C)>=182);
+ return 0;
+}
+'''
+        self.run_probe("controller-settings", prefix.replace("/* PRODUCTION */", code) + probe)
+
     def test_generated_adapters_are_preserved(self):
         from lift_crashday import apply_host_adapter
         from test_menu_gestures import method
@@ -126,6 +238,7 @@ class MenuLayoutTest(unittest.TestCase):
         from test_menu_gestures import method
         function = function.replace(method(source, "static int crashday_hud_hit(float x, float y)"), "")
         function = function.replace(method(source, "JNIEXPORT jint JNICALL Java_org_crashday_port_GameActivity_nativeHudHit"), "")
+        function = function.replace(method(source, "uint32_t crashday_steering_bits(uint32_t car, uint32_t previous)"), "")
         start = source.index("static uint32_t crashday_race_player(void)")
         function = source[start:source.index("JNIEXPORT jboolean JNICALL Java_org_crashday_port_GameActivity_nativeRaceMenuSelect", start)] + function
         probe = r'''
@@ -462,8 +575,13 @@ int main(void){
     def test_production_layout(self):
         source = (ROOT / "android/host/android_main.c").read_text(encoding="utf-8")
         start = source.index("static int menu_scale")
-        source = source[start:source.index("JNIEXPORT", start)]
-        self.run_probe("layout", HARNESS.replace("/* PRODUCTION */", source))
+        from test_menu_gestures import method
+        actual = source[start:source.index("JNIEXPORT", start)]
+        actual += "\n".join(method(source, signature) for signature in (
+            "void crashday_ui_draw_begin(uint32_t widget)", "void crashday_ui_draw_end(void)",
+            "float crashday_ui_text_begin(unsigned kind)", "void crashday_ui_text_end(float scale)",
+            "void crashday_ui_prepare(void)"))
+        self.run_probe("layout", HARNESS.replace("/* PRODUCTION */", actual))
 
 
 if __name__ == "__main__":

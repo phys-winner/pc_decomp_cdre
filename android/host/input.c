@@ -833,7 +833,7 @@ void void_input_pump(void)
         motion_head = (motion_head + 1) & 255;
         --motion_count;
     }
-    static uint32_t delivered_buttons, down_frame[8], down_epoch[8];
+    static uint32_t delivered_buttons, down_frame[8], down_epoch[8], up_frame[8], up_epoch[8];
     while (button_count && button_queue[button_head].serial <= motion_ack) {
         crashday_button_event event = button_queue[button_head];
         if (event.epoch != __atomic_load_n(&android_input_epoch, __ATOMIC_ACQUIRE)) {
@@ -842,6 +842,9 @@ void void_input_pump(void)
             continue;
         }
         uint32_t bit = 1u << event.button;
+        /* The UI must observe release before another press, including queued swipe steps. */
+        if (event.down && ui_buttons && g_d3d_device && up_epoch[event.button] == event.epoch &&
+            up_frame[event.button] == g_d3d_device->frame) break;
         if (!event.down && (delivered_buttons & bit) && down_epoch[event.button] == event.epoch &&
             ((ui_buttons && event.button < 2 && (!(MEM32(0x926A28u) & bit) || !(observed_buttons & bit))) ||
              (g_d3d_device && g_d3d_device->frame - down_frame[event.button] < 2))) break;
@@ -850,6 +853,10 @@ void void_input_pump(void)
             down_epoch[event.button] == event.epoch && event.epoch == __atomic_load_n(&android_input_epoch, __ATOMIC_ACQUIRE)) {
             editor_up = 1;
             editor_epoch = event.epoch;
+        }
+        if (!event.down && (delivered_buttons & bit) && down_epoch[event.button] == event.epoch) {
+            up_frame[event.button] = g_d3d_device ? g_d3d_device->frame : 0;
+            up_epoch[event.button] = event.epoch;
         }
         if (event.down) {
             delivered_buttons |= bit;

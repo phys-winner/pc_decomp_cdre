@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import org.crashday.port.PortText;
 
 /** Native Workshop browsing and the installed mod order share the launcher's theme and process. */
 public final class WorkshopActivity extends Activity {
@@ -64,6 +65,8 @@ public final class WorkshopActivity extends Activity {
     private List<WorkshopStore.Entry> entries = new ArrayList<>();
     private String query = "", category = "", sort = "trend", catalogError = "", snapshot = "", tabsSnapshot = "";
     private int tab, page = 1;
+    private final int[] tabScroll = new int[3];
+    private int bodyGeneration;
     private int cardColumns = 1;
     private volatile int generation;
     private boolean loading, visible, probing, available;
@@ -72,13 +75,19 @@ public final class WorkshopActivity extends Activity {
     private Object backCallback;
     private AlertDialog shownDialog;
     private String detailId = "";
+    private String language;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        language = GameOptions.language(this);
         ui = new Ui(this);
         if (state != null) {
             query = state.getString("query", ""); category = state.getString("category", "");
             sort = state.getString("sort", "trend"); page = state.getInt("page", 1); tab = state.getInt("tab", 0);
+            tab = Math.max(0, Math.min(2, tab));
+            int[] positions = state.getIntArray("tabScroll");
+            if (positions != null && positions.length == tabScroll.length)
+                System.arraycopy(positions, 0, tabScroll, 0, tabScroll.length);
         }
         try { store = WorkshopStore.get(this); }
         catch (Exception error) {
@@ -87,13 +96,16 @@ public final class WorkshopActivity extends Activity {
                 .setOnCancelListener(dialog -> finish()));
             return;
         }
+        int restoredScroll = tabScroll[tab];
         build();
+        tabScroll[tab] = restoredScroll;
+        renderBodyAt(restoredScroll);
         if (Build.VERSION.SDK_INT >= 33) {
             android.window.OnBackInvokedCallback callback = this::finish;
             backCallback = callback;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0, callback);
         }
-        loadCatalog();
+        loadCatalog(false);
         probe();
         String restoredDetails = state == null ? "" : state.getString("details", "");
         if (!restoredDetails.isEmpty()) resolveLink(restoredDetails);
@@ -120,6 +132,8 @@ public final class WorkshopActivity extends Activity {
         state.putString("query", search != null ? search.getText().toString() : query);
         state.putString("category", category); state.putString("sort", sort);
         state.putInt("page", page); state.putInt("tab", tab);
+        if (scroll != null) tabScroll[tab] = scroll.getScrollY();
+        state.putIntArray("tabScroll", tabScroll);
         if (shownDialog != null && shownDialog.isShowing()) state.putString("details", detailId);
     }
 
@@ -133,7 +147,7 @@ public final class WorkshopActivity extends Activity {
         super.onDestroy();
     }
 
-    private String word(String english, String russian) { return "ru".equals(Texts.language(this)) ? russian : english; }
+    private String word(String english, String russian) { return PortText.get(language, english, russian); }
 
     private void build() {
         LinearLayout root = column();
@@ -240,9 +254,7 @@ public final class WorkshopActivity extends Activity {
         for (int index = 0; index < names.length; ++index) {
             final int next = index;
             TextView choice = button(names[index], tab == index ? Ui.PRIMARY : Ui.QUIET, () -> {
-                if (tab == next) return;
-                if (search != null) query = search.getText().toString().trim();
-                hideKeyboard(); tab = next; renderTabs(); renderBody(true);
+                selectTab(next);
             });
             choice.setTextSize(13); choice.setPadding(ui.dp(6), ui.dp(8), ui.dp(6), ui.dp(8));
             choice.setSelected(tab == index);
@@ -254,10 +266,23 @@ public final class WorkshopActivity extends Activity {
 
     private void renderBody(boolean top) {
         int previousScroll = top ? 0 : scroll.getScrollY();
+        tabScroll[tab] = previousScroll;
+        renderBodyAt(previousScroll);
+    }
+
+    private void selectTab(int next) {
+        if (next == tab) return;
+        tabScroll[tab] = scroll.getScrollY();
+        if (search != null) query = search.getText().toString().trim();
+        hideKeyboard(); tab = next; renderTabs(); renderBodyAt(tabScroll[tab]);
+    }
+
+    private void renderBodyAt(int position) {
+        int token = ++bodyGeneration;
         if (search != null) query = search.getText().toString().trim();
         body.removeAllViews(); catalogActions.clear(); search = null;
         if (tab == 0) renderCatalog(); else if (tab == 1) renderInstalled(); else renderDownloads();
-        scroll.post(() -> { if (!dead) scroll.scrollTo(0, previousScroll); });
+        scroll.post(() -> { if (!dead && token == bodyGeneration) scroll.scrollTo(0, position); });
     }
 
     private void renderCatalog() {
@@ -369,25 +394,30 @@ public final class WorkshopActivity extends Activity {
     }
 
     private void loadCatalog() {
+        loadCatalog(true);
+    }
+
+    private void loadCatalog(boolean resetPosition) {
         if (search != null) query = search.getText().toString().trim();
         final int request = ++generation, requestedPage = page;
         final String requestedQuery = query, requestedCategory = category, requestedSort = sort;
         thumbnails.getQueue().clear();
         loading = true; catalogError = "";
-        if (body != null && tab == 0) renderBody(true);
+        if (resetPosition) tabScroll[0] = 0;
+        if (body != null && tab == 0) renderBodyAt(tabScroll[0]);
         remote.execute(() -> {
             try {
                 WorkshopApi.Page found = WorkshopApi.browse(requestedQuery, requestedCategory, requestedSort, requestedPage);
                 handler.post(() -> {
                     if (dead || request != generation) return;
                     catalog = found; page = found.page; loading = false;
-                    if (tab == 0) renderBody(true);
+                    if (tab == 0) renderBodyAt(tabScroll[0]);
                 });
             } catch (Exception error) {
                 handler.post(() -> {
                     if (dead || request != generation) return;
                     loading = false; catalogError = message(error);
-                    if (tab == 0) renderBody(true);
+                    if (tab == 0) renderBodyAt(tabScroll[0]);
                 });
             }
         });
@@ -440,6 +470,15 @@ public final class WorkshopActivity extends Activity {
             enabled -> change(() -> store.setDisabled(!enabled))));
         controls.addView(ui.buttons(button(word("Enable all", "Включить все"), Ui.SECONDARY, () -> change(() -> store.setAllEnabled(true))),
             button(word("Disable all", "Выключить все"), Ui.QUIET, () -> change(() -> store.setAllEnabled(false)))));
+        TextView deleteAll = button(word("Delete all", "Удалить всё"), Ui.QUIET, () ->
+            show(ui.dialog().setTitle(word("Delete all downloaded mods?", "Удалить все скачанные моды?"))
+                .setMessage(word("All downloaded mods will be removed. Their current updates will be cancelled.",
+                    "Все скачанные моды будут удалены. Их текущие обновления будут отменены."))
+                .setNegativeButton(word("Cancel", "Отмена"), null)
+                .setPositiveButton(word("Delete all", "Удалить всё"), (dialog, which) -> change(store::removeAllInstalled))));
+        boolean hasInstalled = false;
+        for (WorkshopStore.Entry entry : entries) if (entry.installed) { hasInstalled = true; break; }
+        Ui.enable(deleteAll, hasInstalled); controls.addView(deleteAll);
         TextView more = button(word("Local mod options  ▾", "Параметры локальных модов  ▾"), Ui.QUIET, this::localOptions);
         more.setTextSize(13); controls.addView(more);
         int count = 0;
@@ -448,7 +487,7 @@ public final class WorkshopActivity extends Activity {
             empty(word("Your garage is waiting", "Гараж ждёт пополнения"),
                 word("Download a car, track or mod from Explore. Installed items stay available offline.",
                     "Скачай машину, трассу или мод в каталоге. Установленные материалы доступны без интернета."));
-            body.addView(button(word("Explore Workshop", "Открыть каталог"), Ui.PRIMARY, () -> { tab = 0; renderTabs(); renderBody(true); }));
+            body.addView(button(word("Explore Workshop", "Открыть каталог"), Ui.PRIMARY, () -> selectTab(0)));
             return;
         }
         TextView hint = ui.label(word("LOAD ORDER  ·  Earlier items load first", "ПОРЯДОК  ·  Верхние материалы загружаются первыми"), 11, ui.muted);
@@ -536,9 +575,15 @@ public final class WorkshopActivity extends Activity {
 
     private void installOrShow(WorkshopItem item) {
         WorkshopStore.Entry installed = entry(item.id);
-        if (installed != null && pending(installed)) { tab = 2; renderTabs(); renderBody(true); return; }
+        if (installed != null && pending(installed)) { selectTab(2); return; }
         if (installed != null && installed.installed && item.updated <= installed.installedUpdated) { details(item); return; }
-        change(() -> store.enqueue(item), () -> { tab = 2; renderTabs(); renderBody(true); });
+        change(() -> store.enqueue(item), () -> {
+            View downloads = tabs.getChildAt(2);
+            downloads.animate().cancel();
+            downloads.setAlpha(.35f); downloads.setScaleX(.9f); downloads.setScaleY(.9f);
+            downloads.animate().alpha(1).scaleX(1).scaleY(1).setDuration(450).start();
+            downloads.announceForAccessibility(word("Download started", "Загрузка началась"));
+        });
     }
 
     private void details(WorkshopItem initial) {
@@ -637,13 +682,12 @@ public final class WorkshopActivity extends Activity {
     }
 
     private String categoryName(String tag) {
-        if (!"ru".equals(Texts.language(this))) return tag;
-        if ("Car".equalsIgnoreCase(tag) || "Cars".equalsIgnoreCase(tag)) return "Машины";
-        if ("Track".equalsIgnoreCase(tag) || "Tracks".equalsIgnoreCase(tag)) return "Трассы";
-        if ("Track Piece".equalsIgnoreCase(tag) || "Track Pieces".equalsIgnoreCase(tag)) return "Блоки трасс";
-        if ("Ambience".equalsIgnoreCase(tag) || "Ambiences".equalsIgnoreCase(tag)) return "Окружение";
-        if ("Misc".equalsIgnoreCase(tag)) return "Разное";
-        if ("Mixed".equalsIgnoreCase(tag)) return "Смешанное";
+        if ("Car".equalsIgnoreCase(tag) || "Cars".equalsIgnoreCase(tag)) return word("Cars", "Машины");
+        if ("Track".equalsIgnoreCase(tag) || "Tracks".equalsIgnoreCase(tag)) return word("Tracks", "Трассы");
+        if ("Track Piece".equalsIgnoreCase(tag) || "Track Pieces".equalsIgnoreCase(tag)) return word("Track Pieces", "Блоки трасс");
+        if ("Ambience".equalsIgnoreCase(tag) || "Ambiences".equalsIgnoreCase(tag)) return word("Ambience", "Окружение");
+        if ("Misc".equalsIgnoreCase(tag)) return word("Misc", "Разное");
+        if ("Mixed".equalsIgnoreCase(tag)) return word("Mixed", "Смешанное");
         return tag;
     }
 

@@ -217,7 +217,7 @@ public final class Launch {
         State.put(activity, State.launch(distribution.id), "exit", Integer.toString(code));
         if (code != 0) return;
         openLauncher(activity, distribution.id);
-        activity.finishAndRemoveTask();
+        activity.finish();
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
@@ -275,12 +275,28 @@ public final class Launch {
 
     /** The game's PortHooks.migrate, once per process, before the player's choices are read. */
     static synchronized void migrate(Context context, PortHooks hooks) {
+        keepCurrentTask(context);
         if (migrated) return;
         migrated = true;
         try {
             hooks.migrate(context);
         } catch (RuntimeException e) {
             android.util.Log.w("Launcher", "hooks migrate: " + e, e);
+        }
+    }
+
+    /** Earlier builds left separate game tasks in Recents; keep the task being opened. */
+    private static void keepCurrentTask(Context context) {
+        if (!(context instanceof Activity)) return;
+        Activity activity = (Activity) context;
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        for (ActivityManager.AppTask task : manager.getAppTasks()) {
+            try {
+                if (task.getTaskInfo().persistentId != activity.getTaskId()) task.finishAndRemoveTask();
+            } catch (IllegalArgumentException removed) {
+                android.util.Log.w("Launcher", "recent task already removed", removed);
+            }
         }
     }
 

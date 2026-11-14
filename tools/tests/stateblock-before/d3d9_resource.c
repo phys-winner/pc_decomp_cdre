@@ -1594,6 +1594,7 @@ void d3d_stateblock_capture(d3d_stateblock *sb)
     copy_recorded(s->vs_b, src->vs_b, sb->rec_vs_b, 16, 4);
     copy_recorded(s->ps_b, src->ps_b, sb->rec_ps_b, 16, 4);
     copy_recorded(s->transforms, src->transforms, sb->rec_transform, 512, 64);
+    if (sb->rec_transform[256]) s->world_identity = src->world_identity;
     if (sb->rec_viewport) { memcpy(s->viewport, src->viewport, 16); memcpy(s->viewport_z, src->viewport_z, 8); }
     if (sb->rec_scissor) memcpy(s->scissor, src->scissor, 16);
     if (sb->rec_indices) d3d_ref_set(&s->indices, src->indices);

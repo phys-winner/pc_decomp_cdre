@@ -8,6 +8,9 @@ import re
 import subprocess
 import sys
 
+from game_optimizations import flag_independent_entries, omit_unused_call_flags
+from native_math import native_math
+
 ROOT = Path(__file__).resolve().parents[1]
 SDK = Path(os.environ.get("ANDROID_SDK_ROOT", Path.home() / "AppData/Local/Android/Sdk"))
 NDK = Path(os.environ.get("ANDROID_NDK_HOME", SDK / "ndk/27.2.12479018"))
@@ -39,13 +42,22 @@ REP_MOVS = ((b"while (ecx) { MEM32(edi) = MEM32(esi); esi += _df * 4; edi += _df
             (b"while (ecx) { MEM16(edi) = MEM16(esi); esi += _df * 2; edi += _df * 2; --ecx; }", 2),
             (b"while (ecx) { MEM8(edi) = MEM8(esi); esi += _df * 1; edi += _df * 1; --ecx; }", 1))
 
-
 def fast_rep_movs(text):
     for loop, unit in REP_MOVS:
         if loop in text:
             text = text.replace(loop, b"{ if (_df > 0 && recomp_movs_fast(edi, esi, ecx, %du)) "
                                       b"{ esi += ecx * %du; edi += ecx * %du; ecx = 0; } else %s }" % (unit, unit, unit, loop))
     return text
+
+
+def generated_flags(common, source, generated, separate, game_flags):
+    flags = common + ["-w", "-DRECOMP_GENERATED_CODE"]
+    if source != generated / "dispatch.c" and separate:
+        flags += ["-DRECOMP_GUEST_PROVENANCE"]
+    if source.parent == generated / "crashday":
+        flags = [flag for flag in flags if flag not in {"-O2", "-w"}]
+        flags += ["-O3", "-mtune=cortex-a73", "-Wno-everything", *game_flags]
+    return flags
 
 
 def sha(path):
@@ -97,6 +109,10 @@ def main():
     parser.add_argument("--diagnostics", action="store_true")
     parser.add_argument("--rt-check", action="store_true")
     parser.add_argument("--shared", action="store_true")
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument("--pgo-use", type=Path, default=ROOT / "config/heavy-v1.profdata",
+                          help="LLVM gameplay profile (default: the pinned heavy-v1 profile)")
+    profiles.add_argument("--no-pgo", action="store_true", help="Build without the gameplay profile (A/B control)")
     parser.add_argument("--no-fast-rep-movs", action="store_true",
                         help="Compile the lifted rep movs loops as generated (A/B control)")
     parser.add_argument("--no-separate-storage", action="store_true",
@@ -107,14 +123,30 @@ def main():
     if not CLANG.is_file():
         parser.error(f"NDK compiler not found: {CLANG}")
     generated = args.generated.resolve()
+    from fsr_shaders import generate_fsr1
+    generate_fsr1(generated)
+    from fsr3_shaders import pack_fsr3
+    pack_fsr3(generated)
     lifted, pinned = generated_sources(generated)
+    profile = None if args.no_pgo else args.pgo_use.resolve()
+    game_flags = ["-flto=thin"]
+    if profile is not None:
+        if not profile.is_file():
+            parser.error("Gameplay profile is missing; supply --pgo-use or --no-pgo")
+        pinned[profile] = sha(profile)
+        if profile == ROOT / "config/heavy-v1.profdata":
+            metadata = json.loads((ROOT / "config/heavy-v1-profile.json").read_text())
+            if pinned[profile] != metadata["profile_sha256"]:
+                parser.error("The pinned gameplay profile differs from its metadata")
+        game_flags += ["-Werror=profile-instr-out-of-date", "-fprofile-instr-use=" + profile.as_posix(),
+                       "-DCRASHDAY_PGO_PROFILE_" + pinned[profile]]
     out = args.output.resolve()
     if args.shared and out == ROOT / "build/android/crashday-arm64":
         out = ROOT / "build/android/libcrashday.so"
     out.parent.mkdir(parents=True, exist_ok=True)
     compiler = subprocess.check_output([str(CLANG), "--version"], text=True)
     common = [
-        "--target=aarch64-linux-android30", "-O2", "-fno-strict-aliasing", "-fwrapv",
+        "--target=aarch64-linux-android26", "-O2", "-fno-strict-aliasing", "-fwrapv",
         "-fvisibility=hidden", "-fPIC", "-ffp-contract=off", "-fno-math-errno", "-g0",
         "-ffile-prefix-map=" + str(ROOT) + "=.",
         "-DRECOMP_X87_WINDOW", "-Iandroid/runtime", "-Iandroid/host", "-I" + str(generated),
@@ -131,17 +163,11 @@ def main():
         inputs.update(str(path).encode())
         inputs.update(path.read_bytes())
     base_digest = inputs.digest()
-    # Generated code: the guest window and the native register file are
-    # separate storage (memory.c reserves the window at its exact fixed base),
-    # so a volatile guest store need not reload the global registers. The same
-    # prefix and backend flag as BioShock and UT3 (android/runtime/
-    # guest_state_prefix.h; audit: ut3/research/global-separate-prefix-audit.md):
-    # registers stay global and guest accesses volatile. dispatch.c is not
-    # lifted code and keeps the plain flags.
-    separate = [] if args.no_separate_storage else [
-        "-DRECOMP_GUEST_STATE_SEPARATE", "-mllvm", "-basic-aa-separate-storage",
-        "-include", "android/runtime/guest_state_prefix.h"]
-    tasks = [(source, common + ["-w", "-DRECOMP_GENERATED_CODE"] + ([] if source == generated / "dispatch.c" else separate))
+    # One reserved guest allocation cannot overlap native VM state. Guest
+    # accesses stay volatile, and host calls still publish/reload that state.
+    independent = flag_independent_entries(source.read_bytes() for source in lifted
+                                            if source.parent == generated / "crashday")
+    tasks = [(source, generated_flags(common, source, generated, not args.no_separate_storage, game_flags))
              for source in lifted]
     for name in HOST_SOURCES:
         source = ROOT / "android/host" / name
@@ -151,6 +177,8 @@ def main():
         if args.rt_check and name.startswith("d3d9_"):
             flags.append("-DVOID_RT_CHECK")
         tasks.append((source, flags))
+    tasks.append((ROOT / "android/host/fsr3.cpp", common + ["-std=c++17", "-DNDEBUG", "-fno-exceptions", "-fno-rtti",
+                  "-Ireference/fsr3/sdk/include", "-Ireference/fsr3/sdk/src/shared"]))
     mojo_flags = common + [
         "-w", "-DMOJOSHADER_EFFECT_SUPPORT", "-DMOJOSHADER_FLIP_RENDERTARGET", "-DMOJOSHADER_DEPTH_CLIPPING",
         "-DSUPPORT_PROFILE_HLSL=0", "-DSUPPORT_PROFILE_ARB1=0", "-DSUPPORT_PROFILE_ARB1_NV=0",
@@ -169,9 +197,14 @@ def main():
         extra = b""
         text = source.read_bytes()
         compile_source, compile_flags = source, flags
-        if source.is_relative_to(generated) and source != generated / "dispatch.c" and not args.no_fast_rep_movs:
-            transformed = fast_rep_movs(text)
-            if transformed != text:
+        if source.is_relative_to(generated) and source != generated / "dispatch.c":
+            original_text = text
+            if source.parent == generated / "crashday":
+                from game_presentation import presentation
+                text = presentation(text)
+                text = omit_unused_call_flags(native_math(text), independent)
+            transformed = text if args.no_fast_rep_movs else fast_rep_movs(text)
+            if transformed != original_text:
                 text = transformed
                 compile_source = out.parent / "patched" / source.relative_to(generated)
                 compile_source.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +215,7 @@ def main():
             extra = b"".join(path.read_bytes() for path in generated_headers)
         elif source.parent.parent == generated and (source.parent / "functions.h").is_file():
             extra = (source.parent / "functions.h").read_bytes()
-        if source.parent == ROOT / "android/host" and source.suffix == ".c":
+        if source.parent == ROOT / "android/host" and source.suffix in {".c", ".cpp"}:
             includes = set(re.findall(r'^\s*#include\s+"([^"]+\.inc)"', source.read_text(encoding="utf-8"), re.M))
             if "d3d9_thread_check.inc" in includes or args.rt_check and source.name.startswith("d3d9_"):
                 includes.add("d3d9_thread_check.inc")
@@ -191,6 +224,8 @@ def main():
                 if not path.is_file():
                     path = generated / include
                 extra += include.encode() + path.read_bytes()
+            if source.name == "fsr3.cpp":
+                extra += b"".join(p.read_bytes() for p in sorted((ROOT / "reference/fsr3").rglob("*")) if p.is_file())
         digest = hashlib.sha256(base_digest + text + json.dumps(compile_flags).encode() + extra).hexdigest()
         if stamp.exists() and obj.exists():
             cached = json.loads(stamp.read_text(encoding="utf-8"))
@@ -220,20 +255,25 @@ def main():
             if index % 25 == 0 or index == len(tasks):
                 print(f"compiled {index}/{len(tasks)} ({cached} cached)", flush=True)
     if any(sha(path) != digest for path, digest in pinned.items()):
-        raise ValueError("Generated module report, dispatch or PE image changed during compilation")
+        raise ValueError("Generated module input or gameplay profile changed during compilation")
     response = out.parent / "link.rsp"
     response.write_text("\n".join('"' + path.as_posix() + '"' for path in sorted(objects)), encoding="utf-8")
     subprocess.run([
-        str(CLANG), "--target=aarch64-linux-android30", "-Wl,-z,max-page-size=16384",
+        str(CLANG), "--target=aarch64-linux-android26", "-flto=thin", "-Wl,--lto-O3",
+        "-Wl,--thinlto-jobs=" + str(args.jobs),
+        "-Wl,--thinlto-cache-dir=" + str(out.parent / "thinlto-cache"), "-Wl,-z,max-page-size=16384",
         "-Wl,-z,defs", "-Wl,--build-id=sha1", *(["-shared"] if args.shared else []), "@" + str(response),
         "-o", str(out), "-lm", "-ldl", "-llog", "-landroid", "-lEGL", "-lGLESv3", "-laaudio", "-lz",
     ], cwd=ROOT, check=True)
     receipt = {
         "output": str(out), "sha256": sha(out), "compiler": compiler,
-        "target": "aarch64-linux-android30", "cflags": common, "sources": len(tasks),
+        "target": "aarch64-linux-android26", "cflags": common, "sources": len(tasks),
         "cached": cached, "generated": str(generated), "shared": args.shared,
         "fast_rep_movs": not args.no_fast_rep_movs,
         "separate_storage": not args.no_separate_storage,
+        "generated_storage": "guest-object" if not args.no_separate_storage else "unrestricted",
+        "game_cflags": game_flags, "game_native_math": True, "flag_independent_entries": len(independent),
+        "profile_sha256": pinned[profile] if profile is not None else None,
         "whole_game": "NOT YET VERIFIED",
     }
     out.with_suffix(".json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

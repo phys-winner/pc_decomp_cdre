@@ -28,7 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class DrivingControls extends View implements SensorEventListener {
-    static final int STEERING_STICK = 0, STEERING_ARROWS = 1, STEERING_TILT = 2;
+    static final int STEERING_STICK = 0, STEERING_ARROWS = 1, STEERING_TILT = 2, STEERING_WHEEL = 3, STEERING_COUNT = 4;
+    // Retain the old preference indices so existing modern button positions survive.
     static final int LAYOUT_AUTO = -1, NORMAL = 0, DRAG = 1, DRIVING = 2;
 
     private static final int DPAD_UP = 0x0001, DPAD_DOWN = 0x0002, DPAD_LEFT = 0x0004, DPAD_RIGHT = 0x0008;
@@ -38,12 +39,12 @@ final class DrivingControls extends View implements SensorEventListener {
     private static final int EN_NORMAL = 1 << NORMAL, EN_DRAG = 1 << DRAG, EN_DRIVING = 1 << DRIVING;
     private static final int EN_ALL = EN_NORMAL | EN_DRAG | EN_DRIVING;
     private static final String[] PREFIXES = {"", "a_", "c_"};
-    private static final String[] LAYOUT_NAMES = {"NORMAL", "ARROWS", "DRIVING"};
     private static final String PREFS = "nfsmw_touch_controller";
     private static final int PRESSED = Color.argb(190, 0xE8, 0x32, 0x28);
     private static final int PRESSED_DPAD = Color.argb(180, 0xE8, 0x32, 0x28);
     private static final int TOGGLE_BORDER = Color.argb(220, 0xE8, 0x32, 0x28);
     private static final int ACCENT = Color.rgb(0xE8, 0x32, 0x28);
+    private static final int CRUISE_COLOR = Color.rgb(255, 208, 64);
     private static final int FILL = Color.argb(105, 12, 12, 15);
     private static final int BORDER = Color.argb(205, 255, 255, 255);
     private static final int BUTTON_BACKGROUND = Color.argb(175, 15, 15, 18);
@@ -65,9 +66,9 @@ final class DrivingControls extends View implements SensorEventListener {
     private final boolean accelerometer;
     private final float[] filtered = new float[2];
     private boolean enabled, controlsVisible = true;
-    private boolean inGame, editing, listening, floatingSteering, legacyLayout, pauseHint;
+    private boolean inGame, editing, listening, floatingSteering, pauseHint, minigunCruise, minigunLatched;
     private int weaponsEnabled = LB | RB;
-    private int steeringMode = STEERING_ARROWS, layout = LAYOUT_AUTO, editedLayout = NORMAL;
+    private int steeringMode = STEERING_ARROWS, editedLayout = DRIVING, originalSteeringMode;
     private int width, height, builtWidth, builtHeight;
     private int safeLeft, safeTop, safeRight, safeBottom;
     private float opacity, fullLockSine = (float) Math.sin(Math.toRadians(17));
@@ -88,9 +89,9 @@ final class DrivingControls extends View implements SensorEventListener {
     private float lastLeftX, lastLeftY, lastRightX, lastRightY, lastLeftTrigger, lastRightTrigger;
     private int lastButtons;
     private boolean sent;
-    private List<Control> modernDraft, classicDraft;
 
     private Stick leftStick, rightStick;
+    private Wheel steeringWheel;
     private Arrow leftArrow, rightArrow;
     private Trigger leftTrigger, rightTrigger;
     private HudControl tachometer, radar;
@@ -100,7 +101,6 @@ final class DrivingControls extends View implements SensorEventListener {
     private final RectF opacityMinus = new RectF(), opacityPlus = new RectF();
     private final RectF reset = new RectF(), cancel = new RectF(), done = new RectF(), layoutButton = new RectF();
     private final RectF helpBackground = new RectF(), hideSelected = new RectF(), floatingButton = new RectF();
-    private final RectF legacyButton = new RectF();
     private float sizeTextX, opacityTextX, helpSize;
 
     DrivingControls(Context context, String preferencesSuffix) {
@@ -109,7 +109,6 @@ final class DrivingControls extends View implements SensorEventListener {
         preferences = context.getSharedPreferences(PREFS + preferencesSuffix, Context.MODE_PRIVATE);
         opacity = clamp(preferences.getFloat("opacity", .6f), .2f, 1f);
         floatingSteering = preferences.getBoolean("floatingSteering", true);
-        legacyLayout = preferences.getBoolean("legacyLayout", false);
         sensors = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         Sensor sensor = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_GRAVITY);
         accelerometer = sensor == null && sensors != null;
@@ -133,19 +132,13 @@ final class DrivingControls extends View implements SensorEventListener {
     }
 
     void setSteeringMode(int value) {
-        steeringMode = value >= STEERING_STICK && value <= STEERING_TILT ? value : STEERING_STICK;
+        steeringMode = value >= 0 && value < STEERING_COUNT ? value : STEERING_ARROWS;
         release();
         rebuild();
         updateSensor();
     }
 
-    void setLayout(int value) {
-        if (value < LAYOUT_AUTO || value > DRIVING) value = LAYOUT_AUTO;
-        layout = value;
-        release();
-        rebuild();
-        updateSensor();
-    }
+    void setMinigunCruise(boolean value) { minigunCruise = value; release(); }
 
     void setInGame(boolean value) {
         if (inGame == value) return;
@@ -175,14 +168,13 @@ final class DrivingControls extends View implements SensorEventListener {
     boolean usesTilt() { return steeringMode == STEERING_TILT; }
     boolean hasTiltSensor() { return gravity != null; }
     boolean isEditing() { return editing; }
-    boolean isLegacyLayout() { return legacyLayout; }
     void setWeaponsEnabled(int value) {
         value &= LB | RB;
         if (weaponsEnabled == value) return;
         weaponsEnabled = value;
         release();
     }
-    int currentLayout() { return editing ? editedLayout : layout == LAYOUT_AUTO ? (inGame ? DRIVING : NORMAL) : layout; }
+    int currentLayout() { return DRIVING; }
     void publishWeaponHud(boolean active) {
         float[] anchors = new float[6];
         int mask = 0;
@@ -190,11 +182,9 @@ final class DrivingControls extends View implements SensorEventListener {
             int index = control.id.equals("lb") ? 0 : control.id.equals("rb") ? 1 : -1;
             if (index < 0 || control.hidden()) continue;
             control.bounds(traceBounds);
-            float sx = (width - safeLeft - safeRight) / (float) width;
-            float sy = (height - safeTop - safeBottom) / (float) height;
-            float side = Math.min(traceBounds.width() * sx, traceBounds.height() * sy) * .82f;
-            anchors[index * 3] = (safeLeft + control.cx * sx) / width;
-            anchors[index * 3 + 1] = (safeTop + Math.max(side * .5f, traceBounds.top * sy - dp(8) - side * .5f)) / height;
+            float side = Math.min(traceBounds.width(), traceBounds.height()) * .82f;
+            anchors[index * 3] = control.cx / width;
+            anchors[index * 3 + 1] = Math.max(side * .5f, traceBounds.top - dp(8) - side * .5f) / height;
             anchors[index * 3 + 2] = side / height;
             mask |= 1 << index;
         }
@@ -224,11 +214,13 @@ final class DrivingControls extends View implements SensorEventListener {
 
     private void updateAccessibility() {
         GameActivity activity = (GameActivity) getContext();
-        setContentDescription(editing ? activity.tr(
+        String description = editing ? activity.tr(
             "Touch layout editor. Drag a control to move it; adjust size, opacity or visibility, then save or cancel.",
             "Редактор сенсорных кнопок. Перетащите кнопку, измените размер, прозрачность или видимость, затем сохраните или отмените.") : activity.tr(
             "Race touch controls. Hold a pedal to accelerate or brake; steer with your selected control mode. Slide from gas to a weapon or nitro to keep accelerating.",
-            "Сенсорное управление гонкой. Удерживайте педаль для газа или торможения; управляйте выбранным способом. Переместите палец с газа на оружие или нитро, чтобы продолжать разгон."));
+            "Сенсорное управление гонкой. Удерживайте педаль для газа или торможения; управляйте выбранным способом. Переместите палец с газа на оружие или нитро, чтобы продолжать разгон.");
+        if (minigunLatched) description += activity.tr(" Minigun cruise active.", " Круиз-контроль минигана включён.");
+        setContentDescription(description);
     }
 
     private boolean hardwareInput;
@@ -289,6 +281,7 @@ final class DrivingControls extends View implements SensorEventListener {
     }
 
     void release() {
+        minigunLatched = false;
         for (Control control : controls) control.release();
         if (tachometer != null) tachometer.release();
         if (radar != null) radar.release();
@@ -303,7 +296,24 @@ final class DrivingControls extends View implements SensorEventListener {
             GameActivity.nativeController(0, 0, 0, 0, 0, 0, 0);
         }
         GameActivity.nativeHorizon(0);
+        updateAccessibility();
         invalidate();
+    }
+
+    private void cancelMinigunCruise() {
+        minigunLatched = false;
+        if (rightTrigger != null) {
+            removeCallbacks(rightTrigger.latchMinigun);
+            rightTrigger.suppressMinigun = rightTrigger.overMinigun;
+            rightTrigger.slideButtons &= ~RB;
+        }
+        for (Control control : controls) if (control instanceof Minigun) {
+            Minigun gun = (Minigun)control;
+            if (gun.inUse) gun.suppressFire = true;
+            gun.tapCandidate = false;
+            gun.lastTap = 0;
+        }
+        updateAccessibility();
     }
 
     private void fallbackButtons(int next, int previous) {
@@ -324,7 +334,7 @@ final class DrivingControls extends View implements SensorEventListener {
                 lastRightY != 0 || lastLeftTrigger != 0 || lastRightTrigger != 0)) release();
             return;
         }
-        int buttons = 0;
+        int buttons = minigunLatched && (weaponsEnabled & RB) != 0 ? RB : 0;
         for (Control control : controls) buttons |= control.buttons();
         if (radar != null) buttons |= radar.buttons();
         float lx = leftStick == null ? 0 : leftStick.xValue;
@@ -338,7 +348,12 @@ final class DrivingControls extends View implements SensorEventListener {
         } else if (currentLayout() == DRIVING && steeringMode == STEERING_TILT) {
             lx = tilt;
             ly = 0;
+        } else if (steeringMode == STEERING_WHEEL && steeringWheel != null) {
+            lx = steeringWheel.value;
+            ly = 0;
         }
+        if (currentLayout() == DRIVING && (steeringMode == STEERING_STICK || steeringMode == STEERING_WHEEL))
+            lx = GamepadInput.steering(lx, ((GameActivity)getContext()).turnSensitivity);
         float rx = rightStick == null ? 0 : rightStick.xValue;
         float ry = rightStick == null ? 0 : rightStick.yValue;
         float lt = leftTrigger != null && leftTrigger.inUse ? 1 : 0;
@@ -347,6 +362,7 @@ final class DrivingControls extends View implements SensorEventListener {
             ry != lastRightY || lt != lastLeftTrigger || rt != lastRightTrigger) {
             boolean pausePressed = inGame && (buttons & START) != 0 && (lastButtons & START) == 0;
             fallbackButtons(buttons, lastButtons);
+            GameActivity.nativeSteeringDigital(steeringMode == STEERING_ARROWS);
             GameActivity.nativeController(buttons, lx, ly, rx, ry, lt, rt);
             lastButtons = buttons;
             lastLeftX = lx; lastLeftY = ly; lastRightX = rx; lastRightY = ry;
@@ -365,16 +381,7 @@ final class DrivingControls extends View implements SensorEventListener {
     }
 
     boolean handleMotion(MotionEvent event) {
-        if (safeLeft == 0 && safeTop == 0 && safeRight == 0 && safeBottom == 0) return handleTransformedMotion(event);
-        MotionEvent transformed = MotionEvent.obtain(event);
-        transformed.offsetLocation(-safeLeft, -safeTop);
-        android.graphics.Matrix transform = new android.graphics.Matrix();
-        transform.setScale(getWidth() / (float) Math.max(1, getWidth() - safeLeft - safeRight),
-            getHeight() / (float) Math.max(1, getHeight() - safeTop - safeBottom));
-        transformed.transform(transform);
-        boolean handled = handleTransformedMotion(transformed);
-        transformed.recycle();
-        return handled;
+        return handleTransformedMotion(event);
     }
 
     private boolean handleTransformedMotion(MotionEvent event) {
@@ -387,8 +394,7 @@ final class DrivingControls extends View implements SensorEventListener {
             if (!controlsVisible) return false;
             Control hit = controlAt(x, y);
             if (hit == null && inGame) {
-                int region = GameActivity.nativeHudHit((safeLeft + x * (width - safeLeft - safeRight) / width) / width,
-                    (safeTop + y * (height - safeTop - safeBottom) / height) / height);
+                int region = GameActivity.nativeHudHit(x / width, y / height);
                 HudControl hud = region == 1 ? tachometer : region == 2 ? radar : null;
                 if (hud != null && !hud.inUse) hit = hud;
             }
@@ -464,20 +470,17 @@ final class DrivingControls extends View implements SensorEventListener {
         control.bounds(bounds);
         float halfX = Math.max(dp(24), bounds.width() * .5f + dp(5));
         float halfY = Math.max(dp(24), bounds.height() * .5f + dp(5));
-        // The physical left edge has a negative x after the safe-area input transform.
-        float left = inGame && control.id.equals("start") ?
-            -safeLeft * (width / (float) Math.max(1, width - safeLeft - safeRight)) : control.cx - halfX;
-        bounds.set(left, control.cy - halfY, control.cx + halfX, control.cy + halfY);
+        bounds.set(control.cx - halfX, control.cy - halfY, control.cx + halfX, control.cy + halfY);
     }
 
     void beginEdit() {
         release();
-        editedLayout = layout == LAYOUT_AUTO ? DRIVING : layout;
+        editedLayout = DRIVING;
+        originalSteeringMode = steeringMode;
         editing = true;
         updateAccessibility();
         selected = null;
         editorPointer = -1;
-        modernDraft = classicDraft = null;
         rebuild(false);
         updateSensor();
     }
@@ -486,14 +489,13 @@ final class DrivingControls extends View implements SensorEventListener {
         if (save) {
             for (Control control : controls) control.saveIn(editedLayout);
             SharedPreferences.Editor editor = preferences.edit();
-            if (modernDraft != null && legacyLayout) saveDraft(editor, modernDraft, false);
-            if (classicDraft != null && !legacyLayout) saveDraft(editor, classicDraft, true);
-            saveDraft(editor, controls, legacyLayout);
-            editor.putFloat("opacity", opacity).putBoolean("floatingSteering", floatingSteering).putBoolean("legacyLayout", legacyLayout).apply();
+            saveDraft(editor, controls);
+            editor.putFloat("opacity", opacity).putBoolean("floatingSteering", floatingSteering)
+                .putBoolean("fullDisplayLayout", true).remove("legacyLayout").apply();
         } else {
             opacity = clamp(preferences.getFloat("opacity", .6f), .2f, 1f);
             floatingSteering = preferences.getBoolean("floatingSteering", true);
-            legacyLayout = preferences.getBoolean("legacyLayout", false);
+            ((GameActivity)getContext()).changeSteeringMode(originalSteeringMode - steeringMode);
         }
         editing = false;
         updateAccessibility();
@@ -504,10 +506,10 @@ final class DrivingControls extends View implements SensorEventListener {
         updateSensor();
     }
 
-    private void saveDraft(SharedPreferences.Editor editor, List<Control> draft, boolean classic) {
+    private void saveDraft(SharedPreferences.Editor editor, List<Control> draft) {
             for (Control control : draft) {
                 for (int d = 0; d < 3; ++d) {
-                    String key = key(control, d, classic);
+                    String key = key(control, d);
                     editor.putBoolean(key + "_hidden", control.hiddenLayout[d]);
                     if (control.custom[d]) {
                         editor.putFloat(key + "_x", control.px[d] / control.designWidth);
@@ -537,10 +539,9 @@ final class DrivingControls extends View implements SensorEventListener {
                 else if (heightPlus.contains(x, y)) changeDimension(false, .1f);
                 else if (opacityMinus.contains(x, y)) changeOpacity(-.1f);
                 else if (opacityPlus.contains(x, y)) changeOpacity(.1f);
-                else if (layoutButton.contains(x, y)) nextEditedLayout();
+                else if (layoutButton.contains(x, y)) ((GameActivity)getContext()).changeSteeringMode(1);
                 else if (hideSelected.contains(x, y) && selected != null) { selected.userHidden = !selected.userHidden; invalidate(); }
                 else if (floatingButton.contains(x, y)) { floatingSteering = !floatingSteering; invalidate(); }
-                else if (legacyButton.contains(x, y)) switchStyle();
                 else if (reset.contains(x, y)) resetLayout();
                 else if (cancel.contains(x, y)) ((GameActivity) getContext()).closeTouchEditor(false);
                 else if (done.contains(x, y)) ((GameActivity) getContext()).closeTouchEditor(true);
@@ -599,30 +600,9 @@ final class DrivingControls extends View implements SensorEventListener {
         invalidate();
     }
 
-    private void switchStyle() {
-        for (Control control : controls) control.saveIn(editedLayout);
-        if (legacyLayout) classicDraft = new ArrayList<>(controls);
-        else modernDraft = new ArrayList<>(controls);
-        legacyLayout = !legacyLayout;
-        rebuild(false);
-        List<Control> draft = legacyLayout ? classicDraft : modernDraft;
-        if (draft != null) {
-            copyDraft(draft);
-            useLayout(editedLayout);
-        }
-    }
-
     private void changeOpacity(float step) {
         opacity = clamp(Math.round((opacity + step) * 10) / 10f, .2f, 1);
         invalidate();
-    }
-
-    private void nextEditedLayout() {
-        for (Control control : controls) control.saveIn(editedLayout);
-        editedLayout = editedLayout == NORMAL ? DRIVING : editedLayout == DRIVING ? DRAG : NORMAL;
-        selected = null;
-        editorPointer = -1;
-        useLayout(editedLayout);
     }
 
     private void resetLayout() {
@@ -704,6 +684,9 @@ final class DrivingControls extends View implements SensorEventListener {
         controls.add(leftStick);
         controls.add(rightStick);
         leftStick.visibleOn = steeringMode == STEERING_STICK ? EN_NORMAL | EN_DRIVING : EN_NORMAL;
+        steeringWheel = new Wheel("wheel", w * .16f, h * .73f, stickRadius);
+        steeringWheel.visibleOn = steeringMode == STEERING_WHEEL ? EN_DRIVING : 0;
+        controls.add(steeringWheel);
         float arrowSide = unit * 1.15f;
         leftArrow = new Arrow("carril_izq", w * .16f, h * .73f, arrowSide, -1);
         rightArrow = new Arrow("carril_der", w * .16f, h * .73f, arrowSide, 1);
@@ -735,7 +718,7 @@ final class DrivingControls extends View implements SensorEventListener {
         rightTrigger = new Trigger("rt", "RT", w * .93f, h * .10f, shoulderW, shoulderH, false);
         controls.add(leftTrigger);
         RectButton lb = new RectButton("lb", "LB", w * .20f, h * .10f, shoulderW, shoulderH, LB);
-        RectButton rb = new RectButton("rb", "RB", w * .80f, h * .10f, shoulderW, shoulderH, RB);
+        RectButton rb = new Minigun("rb", w * .80f, h * .10f, shoulderW, shoulderH);
         lb.drivingText = "MSL"; rb.drivingText = "MG";
         controls.add(lb); controls.add(rb); controls.add(rightTrigger);
         RectButton back = new RectButton("back", "BACK", w * .44f, h * .79f, unit * .82f, unit * .45f, BACK);
@@ -750,6 +733,7 @@ final class DrivingControls extends View implements SensorEventListener {
         float fit = Math.min(1, Math.min(w / dp(760), h / dp(360))), u = dp(1) * fit;
         for (int d : new int[] {DRIVING, DRAG}) {
             leftStick.defaultFor(d, 112 * u, h - 102 * u, 62 * u / stickRadius);
+            steeringWheel.defaultFor(d, 112 * u, h - 102 * u, 72 * u / stickRadius);
             leftArrow.defaultFor(d, 54 * u, h - 64 * u, 76 * u / arrowSide);
             rightArrow.defaultFor(d, 146 * u, h - 64 * u, 76 * u / arrowSide);
             rightTrigger.defaultFor(d, w - 54 * u, h - 82 * u, 120 * u / (shoulderW * 1.15f));
@@ -763,16 +747,6 @@ final class DrivingControls extends View implements SensorEventListener {
             look.defaultFor(d, w - 160 * u, 32 * u, 46 * u / lookSide);
             start.defaultFor(d, 32 * u, 32 * u, 46 * u / (unit * .92f));
             rightStick.defaultFor(d, w * .5f, h - 82 * u, 54 * u / stickRadius);
-            if (legacyLayout) {
-                leftArrow.defaultFor(d, 48 * u, h - 76 * u, 72 * u / arrowSide);
-                rightArrow.defaultFor(d, 140 * u, h - 76 * u, 72 * u / arrowSide);
-                rightTrigger.defaultFor(d, w - 62 * u, h - 94 * u, 118 * u / (shoulderW * 1.15f));
-                leftTrigger.defaultFor(d, w - 158 * u, h - 67 * u, 84 * u / (shoulderW * .9f));
-                a.defaultFor(d, w - 158 * u, h - 170 * u, 32 * u / buttonRadius);
-                b.defaultFor(d, w - 252 * u, h - 67 * u, 32 * u / buttonRadius);
-                rb.defaultFor(d, w - 62 * u, h - 224 * u, 64 * u / shoulderW);
-                lb.defaultFor(d, w - 158 * u, h - 254 * u, 64 * u / shoulderW);
-            }
         }
         dpad.visibleOn = EN_NORMAL;
         back.visibleOn = EN_NORMAL;
@@ -785,10 +759,8 @@ final class DrivingControls extends View implements SensorEventListener {
         placeButtons(w, h, unit);
     }
 
-    private String key(Control control, int d) { return key(control, d, legacyLayout); }
-
-    private String key(Control control, int d, boolean classic) {
-        return (classic || d == NORMAL ? "" : "v2_") + (steeringMode == STEERING_TILT && d == DRIVING ? "ci_" : PREFIXES[d]) + control.id;
+    private String key(Control control, int d) {
+        return (d == NORMAL ? "" : "v2_") + (steeringMode == STEERING_TILT && d == DRIVING ? "ci_" : PREFIXES[d]) + control.id;
     }
 
     private void load(Control control) {
@@ -798,6 +770,10 @@ final class DrivingControls extends View implements SensorEventListener {
             if (!preferences.contains(key + "_x")) continue;
             control.px[d] = clamp(preferences.getFloat(key + "_x", 0), 0, 1) * width;
             control.py[d] = clamp(preferences.getFloat(key + "_y", 0), 0, 1) * height;
+            if (!preferences.getBoolean("fullDisplayLayout", false)) {
+                control.px[d] = safeLeft + control.px[d] * (width - safeLeft - safeRight) / width;
+                control.py[d] = safeTop + control.py[d] * (height - safeTop - safeBottom) / height;
+            }
             control.ps[d] = clamp(preferences.getFloat(key + "_s", 1), .5f, 2);
             control.pw[d] = clamp(preferences.getFloat(key + "_w", 1), .5f, 2);
             control.ph[d] = clamp(preferences.getFloat(key + "_h", 1), .5f, 2);
@@ -829,7 +805,7 @@ final class DrivingControls extends View implements SensorEventListener {
         widthPlus.set(quarter + dp(61), y, quarter + dp(105), y + side);
         heightMinus.set(w - quarter - dp(105), y, w - quarter - dp(61), y + side);
         heightPlus.set(w - quarter + dp(61), y, w - quarter + dp(105), y + side);
-        float layoutWidth = label.measureText(tr("CONTROLS: DRIVING")) + dp(28);
+        float layoutWidth = label.measureText(tr("STEERING: ") + ((GameActivity)getContext()).steeringName()) + dp(28);
         float resetWidth = label.measureText(tr("RESET")) + dp(28);
         float cancelWidth = label.measureText(tr("CANCEL")) + dp(28);
         float doneWidth = label.measureText(tr("DONE")) + dp(28);
@@ -843,7 +819,6 @@ final class DrivingControls extends View implements SensorEventListener {
         y += side + gap;
         hideSelected.set(optionsCenter - optionsWidth * 1.5f - gap, y, optionsCenter - optionsWidth * .5f - gap, y + side);
         floatingButton.set(optionsCenter - optionsWidth * .5f, y, optionsCenter + optionsWidth * .5f, y + side);
-        legacyButton.set(optionsCenter + optionsWidth * .5f + gap, y, optionsCenter + optionsWidth * 1.5f + gap, y + side);
         String help = tr("Drag a control. Size, width and height affect the selection, or all. Red outlines mark overlaps.");
         helpSize = dp(12);
         label.setTextSize(helpSize);
@@ -859,9 +834,6 @@ final class DrivingControls extends View implements SensorEventListener {
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int save = canvas.save();
-        canvas.translate(safeLeft, safeTop);
-        canvas.scale(Math.max(1, getWidth() - safeLeft - safeRight) / (float) getWidth(),
-            Math.max(1, getHeight() - safeTop - safeBottom) / (float) getHeight());
         if (editing) {
             canvas.drawColor(0xDD08080A);
             for (Control control : controls) if (!control.hidden()) {
@@ -889,10 +861,7 @@ final class DrivingControls extends View implements SensorEventListener {
     private void drawPauseHint(Canvas canvas) {
         for (Control control : controls) if (control.id.equals("start") && (!enabled || !control.hidden())) {
             hitBounds(control, traceBounds);
-            float sx = Math.max(1, width - safeLeft - safeRight) / (float) width;
-            float sy = Math.max(1, height - safeTop - safeBottom) / (float) height;
-            traceBounds.set(0, Math.max(0, safeTop + traceBounds.top * sy),
-                safeLeft + traceBounds.right * sx, Math.min(height, safeTop + traceBounds.bottom * sy));
+            traceBounds.intersect(0, 0, width, height);
             traceBounds.inset(dp(.5f), dp(.5f));
             canvas.drawRoundRect(traceBounds, dp(6), dp(6), pauseFrame);
             String text = ((GameActivity)getContext()).tr("PAUSE", "ПАУЗА");
@@ -911,7 +880,8 @@ final class DrivingControls extends View implements SensorEventListener {
         canvas.scale(control.stretchX, control.stretchY);
         canvas.translate(-control.cx, -control.cy);
         int mask = control instanceof ButtonControl ? ((ButtonControl)control).mask : control instanceof RectButton ? ((RectButton)control).mask : 0;
-        drawingPressed = control.inUse || (rightTrigger != null && rightTrigger.inUse && (rightTrigger.slideButtons & mask) != 0);
+        drawingPressed = control.inUse || (mask == RB && minigunLatched) ||
+            (rightTrigger != null && rightTrigger.inUse && (rightTrigger.slideButtons & mask) != 0);
         control.draw(canvas);
         drawingPressed = false;
         canvas.restoreToCount(save);
@@ -939,13 +909,12 @@ final class DrivingControls extends View implements SensorEventListener {
         drawButton(canvas, opacityPlus, "+", dp(18));
         drawText(canvas, selected == null ? "SIZE" : "SIZE " + Math.round(selected.scale * 100) + " %", sizeTextX, sizeMinus.centerY(), textSize);
         drawText(canvas, "OPACITY " + Math.round(opacity * 100) + " %", opacityTextX, opacityMinus.centerY(), textSize);
-        drawButton(canvas, layoutButton, "CONTROLS: " + LAYOUT_NAMES[editedLayout], textSize);
+        drawButton(canvas, layoutButton, "STEERING: " + ((GameActivity)getContext()).steeringName(), textSize);
         drawButton(canvas, reset, "RESET", textSize);
         drawButton(canvas, cancel, "CANCEL", textSize);
         drawButton(canvas, done, "DONE", textSize);
         drawButton(canvas, hideSelected, selected != null && selected.userHidden ? "SHOW BUTTON" : "HIDE BUTTON", textSize);
         drawButton(canvas, floatingButton, floatingSteering ? "FLOATING: ON" : "FLOATING: OFF", textSize);
-        drawButton(canvas, legacyButton, legacyLayout ? "STYLE: CLASSIC" : "STYLE: NEW", textSize);
         fill.setColor(BUTTON_BACKGROUND);
         canvas.drawRoundRect(helpBackground, dp(8), dp(8), fill);
         drawLabel(canvas, tr("Drag a control. Size, width and height affect the selection, or all. Red outlines mark overlaps."),
@@ -956,8 +925,7 @@ final class DrivingControls extends View implements SensorEventListener {
         GameActivity activity = (GameActivity) getContext();
         if (text.startsWith("Drag a control")) return activity.tr(text,
             "Перетащите кнопку. Размер, ширина и высота: выбранная или все. Красная рамка — пересечение.");
-        if (text.equals("STYLE: CLASSIC")) return activity.tr(text, "СТИЛЬ: ПРЕЖНИЙ");
-        if (text.equals("STYLE: NEW")) return activity.tr(text, "СТИЛЬ: НОВЫЙ");
+        if (text.startsWith("STEERING: ")) return activity.tr("Steering: ", "Руление: ") + text.substring(10);
         if (text.equals("HIDE")) return activity.tr("HIDE", "СКРЫТЬ");
         if (text.equals("TOUCH")) return activity.tr("TOUCH", "СЕНСОР");
         if (text.equals("EDIT")) return activity.tr("EDIT", "ИЗМЕНИТЬ");
@@ -972,14 +940,6 @@ final class DrivingControls extends View implements SensorEventListener {
         if (text.equals("SHOW BUTTON")) return activity.tr(text, "ПОКАЗАТЬ КНОПКУ");
         if (text.equals("FLOATING: ON")) return activity.tr(text, "ПЛАВАЮЩИЙ РУЛЬ: ВКЛ");
         if (text.equals("FLOATING: OFF")) return activity.tr(text, "ПЛАВАЮЩИЙ РУЛЬ: ВЫКЛ");
-        if (text.startsWith("CONTROLS: ")) {
-            String layout = text.substring("CONTROLS: ".length());
-            String translated = activity.tr("CONTROLS: ", "КНОПКИ: ");
-            if (layout.equals("Auto")) return translated + activity.tr("Auto", "Авто");
-            if (layout.equals("NORMAL")) return translated + activity.tr("Normal", "Обычная");
-            if (layout.equals("ARROWS")) return translated + activity.tr("Arrows", "Стрелки");
-            if (layout.equals("DRIVING")) return translated + activity.tr("Driving", "Гонка");
-        }
         return text;
     }
 
@@ -1028,7 +988,11 @@ final class DrivingControls extends View implements SensorEventListener {
         void defaultFor(int d, float x, float y, float s) { fx[d] = x; fy[d] = y; fs[d] = s; }
         void use(int d) {
             if (custom[d]) { cx = px[d]; cy = py[d]; scale = ps[d]; }
-            else { cx = fx[d]; cy = fy[d]; scale = fs[d]; }
+            else {
+                cx = safeLeft + fx[d] * (width - safeLeft - safeRight) / width;
+                cy = safeTop + fy[d] * (height - safeTop - safeBottom) / height;
+                scale = fs[d];
+            }
             stretchX = custom[d] ? pw[d] : 1; stretchY = custom[d] ? ph[d] : 1;
             personalized = custom[d]; userHidden = hiddenLayout[d];
             fit();
@@ -1074,7 +1038,7 @@ final class DrivingControls extends View implements SensorEventListener {
         boolean baseContains(float x, float y) { return false; }
         @Override void press(float x, float y) {
             inUse = true; held = moved = false; downX = x; downY = y;
-            if (region == 2) postDelayed(lookHold, 500);
+            if (region == 2) postDelayed(lookHold, 120);
         }
         @Override void move(float x, float y) {
             if (Math.hypot(x - downX, y - downY) > dp(12)) { moved = true; held = false; removeCallbacks(lookHold); }
@@ -1164,6 +1128,14 @@ final class DrivingControls extends View implements SensorEventListener {
     private final class Trigger extends RectButton {
         final boolean brake;
         int slideButtons;
+        boolean overMinigun, suppressMinigun;
+        final Runnable latchMinigun = () -> {
+            if (inUse && overMinigun && minigunCruise) {
+                minigunLatched = true;
+                updateAccessibility();
+                sendState(); invalidate();
+            }
+        };
         final RectF pedal = new RectF();
         Trigger(String id, String text, float x, float y, float width, float height, boolean brake) {
             super(id, text, x, y, width, height, 0); this.brake = brake; place();
@@ -1185,12 +1157,99 @@ final class DrivingControls extends View implements SensorEventListener {
                     control instanceof RectButton ? ((RectButton)control).mask : 0;
                 if ((mask == A || mask == LB || mask == RB) && !control.hidden() && control.contains(x, y)) slideButtons |= mask;
             }
+            boolean nowOver = (slideButtons & RB) != 0;
+            if (nowOver != overMinigun) {
+                removeCallbacks(latchMinigun);
+                suppressMinigun = false;
+                if (minigunCruise && nowOver) {
+                    if (minigunLatched) { cancelMinigunCruise(); suppressMinigun = true; }
+                    else postDelayed(latchMinigun, 300);
+                }
+            }
+            overMinigun = nowOver;
+            if (suppressMinigun) slideButtons &= ~RB;
         }
         @Override int buttons() { return inUse ? slideButtons : 0; }
-        @Override void release() { super.release(); slideButtons = 0; }
+        @Override void release() { removeCallbacks(latchMinigun); super.release(); slideButtons = 0; overMinigun = suppressMinigun = false; }
         @Override boolean baseContains(float x, float y) { return currentLayout() == NORMAL ? super.baseContains(x, y) : pedal.contains(x, y); }
         @Override void baseBounds(RectF out) { if (currentLayout() == NORMAL) super.baseBounds(out); else out.set(pedal); }
         @Override void draw(Canvas canvas) { if (currentLayout() == NORMAL) super.draw(canvas); else drawPedal(canvas, pedal, brake, inUse); }
+    }
+
+    private final class Minigun extends RectButton {
+        long lastTap, pressedAt;
+        float downX, downY;
+        boolean tapCandidate, suppressFire;
+        Minigun(String id, float x, float y, float w, float h) { super(id, "RB", x, y, w, h, RB); }
+        @Override void press(float x, float y) {
+            pressedAt = android.os.SystemClock.uptimeMillis();
+            downX = x; downY = y; tapCandidate = false;
+            suppressFire = minigunCruise && minigunLatched;
+            if (suppressFire) cancelMinigunCruise();
+            else if (minigunCruise && lastTap != 0 && pressedAt - lastTap <= android.view.ViewConfiguration.getDoubleTapTimeout()) {
+                minigunLatched = true; lastTap = 0;
+            } else { lastTap = 0; tapCandidate = true; }
+            super.press(x, y);
+            updateAccessibility();
+        }
+        @Override void move(float x, float y) {
+            if (Math.hypot(x - downX, y - downY) > dp(12)) tapCandidate = false;
+        }
+        @Override void up() {
+            if (tapCandidate && android.os.SystemClock.uptimeMillis() - pressedAt <= android.view.ViewConfiguration.getDoubleTapTimeout())
+                lastTap = android.os.SystemClock.uptimeMillis();
+            super.release(); suppressFire = false;
+        }
+        @Override int buttons() { return suppressFire ? 0 : super.buttons(); }
+        @Override void release() { super.release(); lastTap = 0; tapCandidate = suppressFire = false; }
+        @Override void draw(Canvas canvas) {
+            super.draw(canvas);
+            if (!minigunLatched) return;
+            stroke.setColor(CRUISE_COLOR);
+            float radius = Math.min(dp(10), bounds.height() * .5f);
+            canvas.drawRoundRect(bounds, radius, radius, stroke);
+            float badgeHeight = bounds.height() * .28f;
+            pressedBounds.set(bounds.left + bounds.width() * .2f, bounds.top,
+                bounds.right - bounds.width() * .2f, bounds.top + badgeHeight);
+            fill.setColor(BUTTON_BACKGROUND);
+            canvas.drawRoundRect(pressedBounds, dp(3), dp(3), fill);
+            label.setColor(CRUISE_COLOR);
+            drawLabel(canvas, ((GameActivity)getContext()).tr("AUTO", "АВТО"), cx, pressedBounds.centerY(),
+                Math.min(dp(10) * scale, badgeHeight * .8f), 1);
+            label.setColor(Color.WHITE);
+        }
+    }
+
+    private final class Wheel extends Control {
+        final float baseRadius;
+        float radius, angle, previousAngle, value;
+        Wheel(String id, float x, float y, float radius) { super(id, x, y); baseRadius = radius; place(); }
+        void place() { radius = baseRadius * scale; }
+        void baseBounds(RectF out) { out.set(cx - radius, cy - radius, cx + radius, cy + radius); }
+        boolean baseContains(float x, float y) { return Math.hypot(x - cx, y - cy) <= radius * 1.1f; }
+        float pointerAngle(float x, float y) { return (float)Math.toDegrees(Math.atan2((y - cy) / stretchY, (x - cx) / stretchX)); }
+        @Override void press(float x, float y) { inUse = true; previousAngle = pointerAngle(x, y); }
+        void move(float x, float y) {
+            if (Math.hypot((x - cx) / stretchX, (y - cy) / stretchY) < radius * .2f) return;
+            float next = pointerAngle(x, y), delta = next - previousAngle;
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            previousAngle = next;
+            angle = clamp(angle + delta, -135, 135);
+            value = angle / 135;
+        }
+        void release() { super.release(); angle = value = 0; }
+        void draw(Canvas canvas) {
+            drawCircle(canvas, cx, cy, radius, inUse);
+            int save = canvas.save(); canvas.rotate(angle, cx, cy);
+            stroke.setColor(withOpacity(BORDER)); stroke.setStrokeWidth(dp(5));
+            canvas.drawCircle(cx, cy, radius * .78f, stroke);
+            canvas.drawLine(cx - radius * .75f, cy - radius * .15f, cx, cy, stroke);
+            canvas.drawLine(cx + radius * .75f, cy - radius * .15f, cx, cy, stroke);
+            canvas.drawLine(cx, cy, cx, cy + radius * .76f, stroke);
+            stroke.setStrokeWidth(dp(2));
+            canvas.restoreToCount(save);
+        }
     }
 
     private final class Stick extends Control {

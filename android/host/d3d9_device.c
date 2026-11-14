@@ -761,6 +761,10 @@ COM_METHOD(dev, SetTransform, 3)
     d3d_device *d = DEV;
     uint32_t slot = transform_slot(ARG(1));
     memcpy(target_state(d)->transforms[slot], GPTR(ARG(2)), 64);
+    if (slot == 256) {
+        target_state(d)->world_identity = ARG(2);
+        DIRTY(d, target_state(d)->world_identity);
+    }
     DIRTY(d, target_state(d)->transforms[slot]);
     if (d->recording) d->recording->rec_transform[slot] = 1;
     return D3D_OK;
@@ -785,6 +789,10 @@ COM_METHOD(dev, MultiplyTransform, 3)
         r[i * 4 + j] = s;
     }
     memcpy(target_state(d)->transforms[slot], r, 64);
+    if (slot == 256) {
+        target_state(d)->world_identity = 0;
+        DIRTY(d, target_state(d)->world_identity);
+    }
     DIRTY(d, target_state(d)->transforms[slot]);
     return D3D_OK;
 }

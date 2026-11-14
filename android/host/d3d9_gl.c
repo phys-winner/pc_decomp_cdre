@@ -60,6 +60,98 @@ void d3d_rt_settle(void);
 void d3d_rt_mirror_frame(uint32_t frame);
 extern uint32_t d3d_constant_generation;
 
+/* Opt-in GPU render-span measurements; availability polling never stalls the pipeline. */
+#define GPU_PROFILE_QUERIES 8
+static PFNGLBEGINQUERYEXTPROC gpu_begin_query;
+static PFNGLENDQUERYEXTPROC gpu_end_query;
+static PFNGLGETQUERYOBJECTUI64VEXTPROC gpu_query_result;
+static GLuint gpu_queries[GPU_PROFILE_QUERIES];
+static GLsync gpu_fences[GPU_PROFILE_QUERIES];
+static uint32_t gpu_frames[GPU_PROFILE_QUERIES];
+static uint64_t gpu_started_ns[GPU_PROFILE_QUERIES];
+static unsigned char gpu_pending[GPU_PROFILE_QUERIES], gpu_valid[GPU_PROFILE_QUERIES];
+static int gpu_active = -1, gpu_attempted;
+
+static void gpu_profile_init(const char *extensions)
+{
+    char path[1100];
+    const char *profile = strrchr(void_data_dir(), '/');
+    if (!profile || strncmp(profile + 1, "userdata-", 9)) return;
+    snprintf(path, sizeof path, "%s/gpu-profile", void_data_dir());
+    FILE *flag = fopen(path, "rb");
+    if (!flag) return;
+    fclose(flag);
+    if (!extensions || !strstr(extensions, "GL_EXT_disjoint_timer_query")) {
+        void_log("[gpu] EXT_disjoint_timer_query unavailable");
+        return;
+    }
+    gpu_begin_query = (PFNGLBEGINQUERYEXTPROC)eglGetProcAddress("glBeginQueryEXT");
+    gpu_end_query = (PFNGLENDQUERYEXTPROC)eglGetProcAddress("glEndQueryEXT");
+    gpu_query_result = (PFNGLGETQUERYOBJECTUI64VEXTPROC)eglGetProcAddress("glGetQueryObjectui64vEXT");
+    if (!gpu_begin_query || !gpu_end_query || !gpu_query_result) { gpu_begin_query = NULL; return; }
+    GLint bits = 0, disjoint = 0;
+    glGetQueryiv(GL_TIME_ELAPSED_EXT, GL_QUERY_COUNTER_BITS_EXT, &bits);
+    if (!bits) { gpu_begin_query = NULL; void_log("[gpu] elapsed counter has no useful bits"); return; }
+    glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+    glGenQueries(GPU_PROFILE_QUERIES, gpu_queries);
+    void_log("[gpu] asynchronous render spans enabled (%d counter bits); spans can include GPU starvation by CPU submission", bits);
+    void_log("[frame] columns: frame mono_ns game_cpu_ns game_wait_ns render_cpu_ns");
+}
+
+static void gpu_profile_begin(uint32_t frame)
+{
+    if (!gpu_begin_query || gpu_attempted) return;
+    gpu_attempted = 1;
+    for (unsigned i = 0; i < GPU_PROFILE_QUERIES; ++i) if (!gpu_pending[i]) {
+        gpu_active = (int)i;
+        gpu_frames[i] = frame;
+        gpu_started_ns[i] = void_perf_now_ns();
+        gpu_begin_query(GL_TIME_ELAPSED_EXT, gpu_queries[i]);
+        break;
+    }
+}
+
+static void gpu_profile_end(uint32_t frame)
+{
+    if (!gpu_begin_query) return;
+    if (gpu_active >= 0) {
+        gpu_end_query(GL_TIME_ELAPSED_EXT);
+        gpu_pending[gpu_active] = gpu_valid[gpu_active] = 1;
+        gpu_fences[gpu_active] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!gpu_fences[gpu_active]) {
+            gpu_pending[gpu_active] = 0;
+            gpu_begin_query = NULL;
+            gpu_active = -1;
+            void_log("[gpu] cannot fence query completion; profiling disabled");
+            return;
+        }
+        gpu_active = -1;
+    }
+    GLint disjoint = 0;
+    glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+    if (disjoint) {
+        memset(gpu_valid, 0, sizeof gpu_valid);
+        void_log("[gpu] disjoint at frame %u; pending timings discarded", frame);
+    }
+    for (unsigned i = 0; i < GPU_PROFILE_QUERIES; ++i) if (gpu_pending[i]) {
+        /* A signalled fence makes the result ready without the older Mali availability-query path. */
+        GLenum done = glClientWaitSync(gpu_fences[i], 0, 0);
+        if (done != GL_ALREADY_SIGNALED && done != GL_CONDITION_SATISFIED) continue;
+        if (gpu_valid[i]) {
+            GLuint64 elapsed = 0;
+            gpu_query_result(gpu_queries[i], GL_QUERY_RESULT, &elapsed);
+            if (elapsed <= void_perf_now_ns() - gpu_started_ns[i])
+                void_log("[gpu] frame %u render_ns %llu", gpu_frames[i], (unsigned long long)elapsed);
+            else void_log("[gpu] frame %u invalid timer elapsed_ns %llu exceeds host_ns %llu", gpu_frames[i],
+                (unsigned long long)elapsed, (unsigned long long)(void_perf_now_ns() - gpu_started_ns[i]));
+        }
+        glDeleteSync(gpu_fences[i]);
+        gpu_fences[i] = NULL;
+        gpu_pending[i] = 0;
+    }
+    gpu_attempted = 0;
+}
+
 /* The Android activity provides the window; the shell build has none. */
 __attribute__((weak)) void *void_android_window(void) { return NULL; }
 __attribute__((weak)) void void_android_frame_presented(void) {}
@@ -171,6 +263,7 @@ static int gl_init(void)
     glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value); d3d_gl_limits.max_3d_texture = (uint32_t)value;
     glGetIntegerv(GL_MAX_DRAW_BUFFERS, &value); d3d_gl_limits.max_draw_buffers = (uint32_t)value;
     const char *extensions = (const char *)glGetString(GL_EXTENSIONS);
+    gpu_profile_init(extensions);
     d3d_gl_limits.astc_ldr = extensions && strstr(extensions, "GL_KHR_texture_compression_astc_ldr") != NULL;
     find_anisotropy();
     find_multisample_modes();
@@ -490,6 +583,9 @@ static d3d_surface *ui_surface(d3d_device *d, d3d_surface *surface)
 }
 
 #include "d3d9_msaa.inc"
+#include "fsr1_programs.inc"
+#include "d3d9_fsr1.inc"
+#include "d3d9_temporal.inc"
 
 /* GPU writes invalidate the derived levels even when the FBO binding is unchanged. */
 static void surface_written(d3d_surface *s)
@@ -563,7 +659,8 @@ static void gl_ui_pass(int enabled)
         scene_phase = -1;
         uint32_t sr[4] = {0, 0, scene_color->width, scene_color->height};
         uint32_t dr[4] = {0, 0, d->backbuffer->width, d->backbuffer->height};
-        d3d_gl_blit(scene_color, sr, d->backbuffer, dr, 2);
+        if (!temporal_upscale(scene_color, d->backbuffer) && !fsr1_upscale(scene_color, d->backbuffer))
+            d3d_gl_blit(scene_color, sr, d->backbuffer, dr, 2);
         if (scene_depth && d->auto_depth)
             d3d_gl_blit(scene_depth, sr, d->auto_depth, dr, 1);
         scene_phase = 1;
@@ -574,18 +671,32 @@ static void gl_ui_pass(int enabled)
     publish_ui_scale(d);
 }
 
-static void run_ui_pass(void *args) { gl_ui_pass(*(const int *)args); }
+typedef struct { int enabled, temporal_scene; } ui_pass_args;
+static void run_ui_pass(void *args)
+{
+    const ui_pass_args *a = args;
+    temporal_scene_allowed = a->temporal_scene;
+    gl_ui_pass(a->enabled);
+}
 
 void d3d_gl_ui_pass(int enabled)
 {
     if (d3d_rt_executing()) { gl_ui_pass(enabled); return; }
     if (!g_d3d_device) return;
+    int temporal_scene = 0;
+    if (temporal_requested) {
+        extern int crashday_ui_scene_current(void);
+        int scene = crashday_ui_scene_current();
+        temporal_scene = scene == 9 || scene == 14 || scene == 20;
+    }
+    const ui_pass_args a = {enabled, temporal_scene};
     d3d_rt_sync_state(g_d3d_device);
-    d3d_rt_call(run_ui_pass, &enabled, sizeof enabled);
+    d3d_rt_call(run_ui_pass, &a, sizeof a);
 }
 
 static void scene_destroy(void)
 {
+    temporal_destroy();
     d3d_surface_free_gpu(scene_color);
     d3d_surface_free_gpu(scene_depth);
     scene_color = scene_depth = NULL;
@@ -596,14 +707,26 @@ static void gl_resize_scene(uint32_t percent)
 {
     d3d_device *d = RDEV;
     scene_destroy();
-    if (percent == 100 || !d->backbuffer) { publish_ui_scale(d); return; }
+    if (percent <= 100) fsr1_init();
+    else { fsr1_enabled = 0; atomic_store_explicit(&fsr1_status, 0, memory_order_release); }
+    const char *upscaler = getenv("CRASHDAY_UPSCALER");
+    temporal_requested = percent <= 100 && upscaler && !strcmp(upscaler, "fsr3"); temporal_failed = 0;
+    if ((percent == 100 && !fsr1_enabled && !temporal_requested) || !d->backbuffer) { publish_ui_scale(d); return; }
+    uint32_t scene_samples = d->backbuffer->multisample;
+    if (fsr1_enabled && !scene_samples) {
+        for (uint32_t samples = 4; samples >= 2; samples /= 2)
+            if (d3d_gl_supports_samples(d->backbuffer->format, samples) &&
+                (!d->auto_depth || d3d_gl_supports_samples(d->auto_depth->format, samples))) { scene_samples = samples; break; }
+        if (!scene_samples) { fsr1_enabled = 0; atomic_store_explicit(&fsr1_status, -1, memory_order_release); }
+    }
     scene_color = d3d_surface_create_gpu(d, d->backbuffer->width * percent / 100,
-        d->backbuffer->height * percent / 100, d->backbuffer->format, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, d->backbuffer->multisample);
+        d->backbuffer->height * percent / 100, d->backbuffer->format, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, scene_samples);
     if (!scene_color) void_fatal("Cannot allocate the scaled 3D render target");
     if (d->auto_depth)
         scene_depth = d3d_surface_create_gpu(d, scene_color->width, scene_color->height,
-            d->auto_depth->format, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, d->auto_depth->multisample);
+            d->auto_depth->format, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, scene_samples);
     if (d->auto_depth && !scene_depth) void_fatal("Cannot allocate the scaled 3D depth buffer");
+    temporal_create(d);
     d->fbo_dirty = 1;
     raster_state_valid = 0;
     publish_ui_scale(d);
@@ -619,7 +742,7 @@ void d3d_gl_resize_scene(d3d_device *d)
     const char *text = getenv("CRASHDAY_RENDER_SCALE");
     char *end;
     unsigned percent = text && *text ? (unsigned)strtoul(text, &end, 10) : 100;
-    if (!text || !*text || *end || percent < 25 || percent > 100) percent = 100;
+    if (!text || !*text || *end || percent < 25 || percent > 200) percent = 100;
     d3d_rt_sync(run_resize_scene, &percent);
 }
 
@@ -664,6 +787,7 @@ void d3d_gl_bind_targets(d3d_device *dev)
         bufs[i] = usable ? GL_COLOR_ATTACHMENT0 + (GLenum)i : GL_NONE;
         if (usable) last = i + 1;
     }
+    temporal_targets(dev, bufs, &last);
     GLsizei count = last ? last : 1;
     if (count != fb_buf_count || memcmp(bufs, fb_bufs, sizeof(GLenum) * (size_t)count)) {
         glDrawBuffers(count, bufs);
@@ -1514,6 +1638,10 @@ static int gl_draw(d3d_device *d, uint32_t primitive, uint32_t start_vertex, uin
         float hx = viewport[2] ? 1.0f / (float)viewport[2] : 0.0f;
         float hy = viewport[3] ? 1.0f / (float)viewport[3] : 0.0f;
         int alpha_func = d->st.rs[15] ? (int)d->st.rs[25] : 8;
+        if (d3d_gl_temporal_enabled()) {
+            float jitter[2], resolution[2]; int scene;
+            d3d_gl_temporal_parameters(d, jitter, resolution, &scene); hx += jitter[0]; hy += jitter[1];
+        }
         d3d_shader_upload(d, hx, hy, alpha_func, (float)(d->st.rs[24] & 0xFF));
     }
     for (int s = 0; s < 16; ++s) if (ps_samplers & (1u << s)) bind_texture(d, s, (GLuint)s);
@@ -1773,6 +1901,7 @@ static int gl_draw(d3d_device *d, uint32_t primitive, uint32_t start_vertex, uin
     uint32_t pixel_xy[2];
     int pixel_read = trace_pixel_read(d, pixel_before, pixel_xy);
     if (d->frame == trace_pixel_frame && !pixel_read) ++trace_pixel_skipped;
+    gpu_profile_begin(d->frame);
     GLenum mode = gl_mode(primitive);
     if (indexed) {
         if (up_indices) {
@@ -1950,6 +2079,8 @@ void d3d_gl_clear_rects(d3d_device *d, uint32_t count, const int32_t *rects, uin
     if ((flags & 2u) && d->ds) { mask |= GL_DEPTH_BUFFER_BIT; glDepthMask(GL_TRUE); glClearDepthf(z); }
     if ((flags & 4u) && d->ds && d->ds->fmt && d->ds->fmt->stencil) { mask |= GL_STENCIL_BUFFER_BIT; glStencilMask(0xFF); glClearStencil((GLint)stencil); }
     if (!mask) return;
+    int temporal_color_clear = temporal_requested && !scene_phase && !scene_promoted && d->rt[0] == d->backbuffer && fb_buf_count == 3;
+    if (temporal_color_clear) { GLenum buffer = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &buffer); }
     /* The cleared area is the viewport, narrowed by the scissor and rects. */
     int vx = (int)d->st.viewport[0], vy = (int)d->st.viewport[1];
     int vx2 = vx + (int)d->st.viewport[2], vy2 = vy + (int)d->st.viewport[3];
@@ -1981,6 +2112,7 @@ void d3d_gl_clear_rects(d3d_device *d, uint32_t count, const int32_t *rects, uin
         }
     }
     glDisable(GL_SCISSOR_TEST);
+    if (temporal_color_clear) glDrawBuffers(fb_buf_count, fb_bufs);
     if (flags & 1u) targets_written(d);
 }
 
@@ -2279,6 +2411,8 @@ void d3d_request_frame_dump(void) { dump_requested = 1; }
 static void gl_device_destroy(void)
 {
     scene_destroy();
+    temporal_shutdown();
+    fsr1_destroy();
     multisample_destroy();
     raster_state_valid = 0;
     glUseProgram(0);
@@ -2387,8 +2521,22 @@ void d3d_gl_frame_pace(void)
     frame_deadline_ns = now >= frame_deadline_ns + period ? now + period : frame_deadline_ns + period;
 }
 
-static uint64_t present_game_cpu_ns;
+static uint64_t present_game_cpu_ns, present_game_wait_ns;
 static d3d_rt_stats_t present_game_stats;
+
+static void profile_cpu_frame(uint32_t frame)
+{
+    if (!gpu_begin_query) return;
+    static uint64_t previous_game, previous_wait, previous_render;
+    struct timespec cpu;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
+    uint64_t render = (uint64_t)cpu.tv_sec * 1000000000ull + (uint64_t)cpu.tv_nsec;
+    if (previous_game && present_game_cpu_ns >= previous_game && present_game_wait_ns >= previous_wait && render >= previous_render)
+        void_log("[frame] %u %llu %llu %llu %llu", frame, (unsigned long long)void_perf_now_ns(),
+            (unsigned long long)(present_game_cpu_ns - previous_game),
+            (unsigned long long)(present_game_wait_ns - previous_wait), (unsigned long long)(render - previous_render));
+    previous_game = present_game_cpu_ns; previous_wait = present_game_wait_ns; previous_render = render;
+}
 
 static void gl_present(d3d_device *dev)
 {
@@ -2412,7 +2560,7 @@ static void gl_present(d3d_device *dev)
     if (dev->frame - fps_frame >= 600 || !fps_start.tv_sec || now.tv_sec - fps_start.tv_sec >= 5) {
         struct timespec cpu;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
-        uint64_t wait = void_lock_wait_ns();
+        uint64_t wait = present_game_wait_ns;
         double dt = (double)(now.tv_sec - fps_start.tv_sec) + (double)(now.tv_nsec - fps_start.tv_nsec) / 1e9;
         double dcpu = (double)(cpu.tv_sec - cpu_start.tv_sec) + (double)(cpu.tv_nsec - cpu_start.tv_nsec) / 1e9;
         uint32_t frames = dev->frame - fps_frame;
@@ -2535,21 +2683,25 @@ static void gl_present(d3d_device *dev)
     } else {
         glFlush();
     }
+    gpu_profile_end(dev->frame);
+    profile_cpu_frame(dev->frame);
     dev->fbo_dirty = 1;
     raster_state_valid = 0;
     scene_phase = scene_promoted = 0;
+    temporal_clear = 1;
     publish_ui_scale(dev);
     void_android_frame_presented();
     void_perf_frame_end(dev->frame);
 }
 
-typedef struct { uint32_t frame; uint64_t game_cpu_ns; d3d_rt_stats_t stats; } present_args;
+typedef struct { uint32_t frame; uint64_t game_cpu_ns, game_wait_ns; d3d_rt_stats_t stats; } present_args;
 
 static void run_present(void *args)
 {
     const present_args *a = (const present_args *)args;
     d3d_rt_mirror_frame(a->frame);
     present_game_cpu_ns = a->game_cpu_ns;
+    present_game_wait_ns = a->game_wait_ns;
     present_game_stats = a->stats;
     gl_present(RDEV);
     d3d_rt_mirror_frame(a->frame + 1);
@@ -2606,7 +2758,7 @@ void d3d_gl_present(d3d_device *dev)
     }
     struct timespec cpu;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
-    present_args a = { dev->frame, (uint64_t)cpu.tv_sec * 1000000000ull + (uint64_t)cpu.tv_nsec, { 0 } };
+    present_args a = { dev->frame, (uint64_t)cpu.tv_sec * 1000000000ull + (uint64_t)cpu.tv_nsec, void_lock_wait_ns(), { 0 } };
     d3d_rt_stats(&a.stats);
     d3d_rt_sync_state(dev);
     d3d_rt_frame_queued();

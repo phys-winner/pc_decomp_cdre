@@ -7,6 +7,10 @@ capability checks, cleanup of unused files,
 texture conversion, GitHub update checks passed on to the game, the port's version and GitHub link.
 English, Russian, German and Polish. Target SDK 37.
 
+The launcher and game editions share one Android task and one Recents card. Game activities use
+`singleTop` and inherit the application's task affinity; native libraries still run in their separate
+processes. Opening the launcher or game removes duplicate tasks left by earlier APKs.
+
 The base's Java sources live in the template package `port.launcher` and are rewritten into the game's own
 package (`<application id>.launcher`) at build time; a game describes itself in `android/port.json`.
 

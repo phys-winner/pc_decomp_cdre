@@ -19,6 +19,8 @@ HARNESS = r'''
 #include <string.h>
 #define CRASHDAY_ANDROID_APP
 static int input_lock;
+typedef int pthread_mutex_t;
+#define PTHREAD_MUTEX_INITIALIZER 0
 static uint32_t frame;
 static uint32_t void_input_frame(void){return frame;}
 static void pthread_mutex_lock(int *p){if(*p)abort();*p=1;}
@@ -52,6 +54,15 @@ int main(void){
     CHECK(!xinput_capabilities(0,0,64),"neutral capabilities query succeeds");
     CHECK(MEM16(68)==0xF3FF && MEM8(70)==255 && MEM8(71)==255,"neutral capabilities expose all buttons and triggers");
     for(unsigned axis=72;axis<80;axis+=2)CHECK(MEM16(axis)==32767,"neutral capabilities expose every stick axis");
+    CHECK(MEM16(66)==1&&MEM16(80)==65535&&MEM16(82)==65535,"force feedback advertises both motors");
+    MEM16(128)=12345;MEM16(130)=54321;CHECK(!xinput_set_state(0,128),"two-motor rumble succeeds");
+    CHECK(void_input_rumble(0)==(12345u|(54321u<<16)),"both rumble channels reach Android");
+    MEM16(128)=MEM16(130)=0;xinput_set_state(0,128);void_input_rumble(0);
+    CHECK(!void_input_rumble(0),"stop reaches Android");
+    MEM16(128)=65535;xinput_set_state(0,128);MEM16(128)=0;xinput_set_state(0,128);
+    CHECK(void_input_rumble(0)==65535&&!void_input_rumble(0),"short pulse survives between polls then stops");
+    MEM16(130)=65535;xinput_set_state(0,128);CHECK(!void_input_rumble(1)&&!void_input_rumble(0),"lifecycle reset clears pending and held rumble");
+    MEM16(130)=0;
     for(unsigned i=6;i<16;++i)CHECK(state[i]==0,"cold-start analog state is neutral");
     CHECK(!void_input_touch_pad(1,state),"only controller zero is exposed");
     void_input_drive_active(1);
@@ -162,6 +173,7 @@ class ControllerPulses(unittest.TestCase):
                       'int void_input_touch_pad_snapshot(', 'int void_input_touch_pad(')
         actual = fields + '\n'.join(method(source, signature) for signature in signatures)
         xinput = (ROOT / 'android/host/xinput.c').read_text(encoding='utf-8')
+        actual += '\n' + xinput[xinput.index('static pthread_mutex_t rumble_lock'):xinput.index('extern int void_input_touch_pad')]
         actual += '\n' + '\n'.join(method(xinput, 'static uint32_t '+name+'(') for name in
                                      ('xinput_get_state','xinput_set_state','xinput_capabilities','xinput_battery'))
         before, removed = LATCH.subn('', actual)

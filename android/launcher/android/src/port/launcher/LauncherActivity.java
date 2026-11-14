@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -27,8 +28,10 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 /** The game's launcher: its distributions and their files (a folder, a ZIP to unpack or to play
@@ -54,7 +57,8 @@ public final class LauncherActivity extends Activity {
     private String busy;
     private int busySection = Texts.GAME_FILES;
     private boolean filesExpanded, texturesExpanded;
-    private boolean checking;
+    private boolean checking, touching;
+    private final Set<Integer> refreshPending = new LinkedHashSet<>();
     private boolean initializing = true, autoLaunchPending, playRequestedPending;
     private TextureBackend textures;
     private TextureBackend.Scan textureScan;
@@ -135,6 +139,21 @@ public final class LauncherActivity extends Activity {
         autoLaunchPending = playRequestedPending = false;
     }
 
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) touching = true;
+        try {
+            return super.dispatchTouchEvent(event);
+        } finally {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                touching = false;
+                int[] pending = refreshPending.stream().mapToInt(Integer::intValue).toArray();
+                refreshPending.clear();
+                if (pending.length != 0 && !isFinishing() && !isDestroyed()) refresh(pending);
+            }
+        }
+    }
+
     private boolean launchWhenReady() {
         if (initializing || (gpu == null && needsGpu(selected))) return false;
         boolean automatic = autoLaunchPending;
@@ -165,14 +184,12 @@ public final class LauncherActivity extends Activity {
         }
     }
 
-    /** Redraws the renderer card until the driver check (process :probe) reports. */
+    /** Refresh once the driver check reports; rebuilding cards while it runs cancels gestures. */
     private final Runnable probeWatch = new Runnable() {
         @Override public void run() {
             boolean running = Probe.running(LauncherActivity.this);
-            refreshRenderer();
-            refreshTextures(idle());
-            refreshDistributions(idle());
             if (running) handler.postDelayed(this, PROBE_POLL_MS);
+            else refresh(Texts.RENDERER, Texts.TEXTURES, Texts.PLAY);
         }
     };
 
@@ -243,6 +260,8 @@ public final class LauncherActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        touching = false;
+        refreshPending.clear();
         visible = false;
         super.onPause();
     }
@@ -454,6 +473,10 @@ public final class LauncherActivity extends Activity {
 
     private void refresh(int... sections) {
         if (ui == null) return;
+        if (touching) {
+            for (int section : sections) refreshPending.add(section);
+            return;
+        }
         boolean idle = idle();
         for (int section : sections) {
             View focused = group(section).findFocus();
@@ -1497,7 +1520,7 @@ public final class LauncherActivity extends Activity {
         if (checking || !spec.updates) return;
         checking = true;
         note(Texts.ABOUT, null, false);
-        refreshAbout();
+        refresh(Texts.ABOUT);
         background(() -> Updates.check(this), info -> {
             checking = false;
             if (manual) note(Texts.ABOUT, Updates.available(this) == null ? Texts.t(this, Texts.UP_TO_DATE) : null, false);
